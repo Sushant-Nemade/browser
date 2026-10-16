@@ -1,0 +1,2818 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Realm Stitchers — Cross-Reality Multiplayer Combat (Argon Real2Sim + Three.js + WebRTC)</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #060913;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      color: #f8fafc;
+    }
+    .font-mono-tech {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    #canvas-container {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+      cursor: crosshair;
+    }
+    .hud-glass {
+      background: rgba(10, 15, 29, 0.78);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(56, 189, 248, 0.22);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+    }
+    .hud-glass-amber {
+      background: rgba(24, 16, 10, 0.80);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(251, 191, 36, 0.28);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+    }
+    .semantic-label {
+      position: absolute;
+      transform: translate(-50%, -100%);
+      pointer-events: none;
+      white-space: nowrap;
+      transition: opacity 0.15s ease;
+      z-index: 10;
+    }
+    .scan-line {
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, transparent, #38bdf8, #c084fc, #38bdf8, transparent);
+      box-shadow: 0 0 20px #38bdf8, 0 0 40px #a855f7;
+      z-index: 25;
+      pointer-events: none;
+      display: none;
+    }
+    @keyframes scanSweep {
+      0% { top: 8%; opacity: 0.95; }
+      50% { top: 90%; opacity: 1; }
+      100% { top: 8%; opacity: 0.95; }
+    }
+    .scanning-active .scan-line {
+      display: block;
+      animation: scanSweep 2.2s ease-in-out infinite;
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.6);
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: rgba(56, 189, 248, 0.35);
+      border-radius: 3px;
+    }
+    .selectable-text {
+      user-select: text;
+      -webkit-user-select: text;
+    }
+  </style>
+</head>
+<body class="relative w-full h-full overflow-hidden bg-slate-950 text-slate-100">
+
+  <!-- 3D WebGL Viewport -->
+  <div id="canvas-container"></div>
+
+  <!-- Dynamic 3D Semantic Floating Labels Layer -->
+  <div id="labels-container" class="pointer-events-none absolute inset-0 overflow-hidden z-10"></div>
+
+  <!-- Dual Scan Sweep Line Effect -->
+  <div id="scan-line-el" class="scan-line"></div>
+
+  <!-- Top Navigation & Telemetry Header -->
+  <header class="relative z-20 flex flex-wrap items-center justify-between gap-2 px-3 py-2 hud-glass border-b border-cyan-500/25">
+    <!-- Brand & Realm Stitch Status -->
+    <div class="flex items-center gap-2.5">
+      <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500 via-blue-600 to-purple-600 shadow-md shadow-cyan-500/20 font-mono-tech font-bold text-white text-sm">
+        RS
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <h1 class="text-sm sm:text-base font-extrabold tracking-tight text-white">REALM STITCHERS</h1>
+          <span id="stitch-status-badge" class="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-mono-tech font-semibold text-emerald-300 border border-emerald-500/30">
+            <span class="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            PORTAL ACTIVE
+          </span>
+        </div>
+        <p class="text-[11px] text-slate-400 hidden sm:block">
+          India Desk (<span class="text-cyan-300">Bengaluru</span>) <span class="text-purple-400 font-bold">⇄</span> US Table (<span class="text-amber-300">Austin</span>) • Gemini 4 Argon Real2Sim
+        </p>
+      </div>
+    </div>
+
+    <!-- Center Action Controls -->
+    <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
+      <!-- Hybrid Mode Toggle: Soldier <-> RC Car -->
+      <button id="btn-toggle-mode" type="button" class="flex items-center gap-2 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 px-3 py-1.5 text-xs font-bold text-white shadow-lg shadow-cyan-600/25 transition active:scale-95 border border-cyan-300/30" title="Shortcut: [V] Key">
+        <span id="mode-icon">🪖</span>
+        <span id="mode-label">MODE: TACTICAL SOLDIER</span>
+        <span class="rounded bg-slate-950/50 px-1.5 py-0.5 font-mono-tech text-[10px] text-cyan-200">[V]</span>
+      </button>
+
+      <!-- Argon Semantic Vision Toggle -->
+      <button id="btn-toggle-semantic" type="button" class="flex items-center gap-1.5 rounded-lg bg-slate-800/90 hover:bg-slate-700 px-2.5 py-1.5 text-xs font-semibold text-cyan-300 border border-cyan-500/30 transition active:scale-95" title="Shortcut: [T] Key">
+        <span>👁️</span>
+        <span id="semantic-btn-text">Argon Vision: ON</span>
+        <span class="hidden md:inline rounded bg-slate-950/60 px-1 font-mono-tech text-[10px] text-slate-300">[T]</span>
+      </button>
+
+      <!-- Dual Scan & Re-Stitch Trigger -->
+      <button id="btn-rescan-stitch" type="button" class="flex items-center gap-1.5 rounded-lg bg-purple-900/60 hover:bg-purple-800/80 px-2.5 py-1.5 text-xs font-semibold text-purple-200 border border-purple-400/35 transition active:scale-95" title="Run Dual Scan & Restore Cover [R]">
+        <span>🔄</span>
+        <span class="hidden sm:inline">Dual Scan &amp; Stitch</span>
+        <span class="sm:hidden">Stitch</span>
+      </button>
+
+      <!-- Camera Angle Cycle -->
+      <button id="btn-camera-view" type="button" class="flex items-center gap-1 rounded-lg bg-slate-800/90 hover:bg-slate-700 px-2.5 py-1.5 text-xs font-semibold text-slate-200 border border-slate-600/50 transition active:scale-95" title="Cycle Camera Angle [K]">
+        <span>🎥</span>
+        <span id="camera-view-label" class="hidden md:inline">Cam: Chase</span>
+      </button>
+    </div>
+
+    <!-- Right Networking, Architecture & Audio Controls -->
+    <div class="flex items-center gap-1.5">
+      <!-- Live WebRTC Status & Modal Trigger -->
+      <button id="btn-open-webrtc" type="button" class="flex items-center gap-1.5 rounded-lg bg-slate-900/90 hover:bg-slate-800 px-2.5 py-1.5 text-xs font-mono-tech font-semibold border border-emerald-500/40 text-emerald-300 transition">
+        <span id="rtc-dot" class="h-2 w-2 rounded-full bg-emerald-400 animate-ping"></span>
+        <span id="rtc-status-short">WebRTC: P2P READY</span>
+      </button>
+
+      <!-- Architecture & Scaling Blueprint Modal Trigger -->
+      <button id="btn-open-arch" type="button" class="flex items-center gap-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 px-2.5 py-1.5 text-xs font-semibold text-amber-300 border border-amber-400/35 transition">
+        <span>⚙️</span>
+        <span class="hidden lg:inline">Architecture &amp; Stack</span>
+        <span class="lg:hidden">Stack</span>
+      </button>
+
+      <!-- Sound Toggle -->
+      <button id="btn-toggle-audio" type="button" class="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-800/90 hover:bg-slate-700 text-sm border border-slate-600/50 transition" title="Toggle Synthesized Audio">
+        <span id="audio-icon">🔊</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Dual Scan Progress Banner (Shown during Real2Sim Scan Sequence) -->
+  <div id="scan-banner" class="hidden relative z-20 mx-auto mt-2 max-w-2xl rounded-xl hud-glass px-4 py-3 border border-purple-400/50 shadow-2xl">
+    <div class="flex items-center justify-between gap-3">
+      <div class="flex items-center gap-2.5">
+        <div class="h-3 w-3 rounded-full bg-purple-400 animate-ping"></div>
+        <div>
+          <div id="scan-stage-title" class="text-xs font-mono-tech font-bold uppercase tracking-wider text-purple-300">
+            STAGE 1/4: DUAL SMARTPHONE VIDEO STREAM INGESTION
+          </div>
+          <div id="scan-stage-desc" class="text-xs text-slate-300 mt-0.5">
+            Scanning India Desk (Keyboard, Ceramic Mug, Monitor) &amp; US Dining Table (Cereal Box, Fruit Bowl)...
+          </div>
+        </div>
+      </div>
+      <span id="scan-pct" class="font-mono-tech text-sm font-bold text-cyan-300">25%</span>
+    </div>
+    <div class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
+      <div id="scan-progress-bar" class="h-full bg-gradient-to-r from-cyan-400 via-purple-500 to-amber-400 transition-all duration-300" style="width: 25%"></div>
+    </div>
+  </div>
+
+  <!-- Left Combat Telemetry & Player Status HUD -->
+  <aside class="pointer-events-none absolute left-3 top-16 z-20 flex flex-col gap-2 w-64 sm:w-72">
+    <!-- Local Player (India Desk / Or Selected Realm) Card -->
+    <div class="pointer-events-auto rounded-xl hud-glass p-3">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="inline-block h-2.5 w-2.5 rounded-full bg-cyan-400"></span>
+          <span id="local-player-title" class="text-xs font-bold tracking-wide text-cyan-300 uppercase">YOU • INDIA DESK (P1)</span>
+        </div>
+        <span id="current-zone-pill" class="rounded bg-cyan-500/20 px-1.5 py-0.5 font-mono-tech text-[10px] font-semibold text-cyan-200 border border-cyan-500/30">
+          REALM: INDIA
+        </span>
+      </div>
+
+      <!-- Health & Shield / Nitro Bars -->
+      <div class="mt-2 space-y-1.5">
+        <div>
+          <div class="flex justify-between text-[11px] font-mono-tech">
+            <span class="text-slate-400">ARMOR INTEGRITY</span>
+            <span id="p1-hp-text" class="text-emerald-300 font-bold">100 / 100</span>
+          </div>
+          <div class="mt-0.5 h-2 w-full overflow-hidden rounded-full bg-slate-900/90 p-0.5 border border-slate-700/60">
+            <div id="p1-hp-bar" class="h-full rounded-full bg-gradient-to-r from-emerald-500 to-cyan-400 transition-all duration-150" style="width: 100%"></div>
+          </div>
+        </div>
+
+        <div>
+          <div class="flex justify-between text-[11px] font-mono-tech">
+            <span id="p1-energy-label" class="text-slate-400">TACTICAL STAMINA / NITRO</span>
+            <span id="p1-energy-text" class="text-amber-300 font-bold">100%</span>
+          </div>
+          <div class="mt-0.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-900/90">
+            <div id="p1-energy-bar" class="h-full rounded-full bg-gradient-to-r from-amber-500 to-yellow-300 transition-all duration-100" style="width: 100%"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Active Cover & Stance Status -->
+      <div class="mt-2.5 flex items-center justify-between border-t border-slate-800/80 pt-2 text-[11px]">
+        <div class="flex items-center gap-1.5">
+          <span class="text-slate-400">Cover Status:</span>
+          <span id="p1-cover-status" class="font-mono-tech font-semibold text-slate-300">EXPOSED</span>
+        </div>
+        <span id="p1-stance-badge" class="rounded bg-slate-800 px-1.5 py-0.5 font-mono-tech text-[10px] text-cyan-300">STANDING</span>
+      </div>
+    </div>
+
+    <!-- Remote Opponent (US Dining Table / WebRTC Peer or AI Bot) Card -->
+    <div class="pointer-events-auto rounded-xl hud-glass-amber p-3">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="inline-block h-2.5 w-2.5 rounded-full bg-amber-400"></span>
+          <span id="remote-player-title" class="text-xs font-bold tracking-wide text-amber-300 uppercase">OPPONENT • US TABLE (P2)</span>
+        </div>
+        <span id="remote-mode-pill" class="rounded bg-amber-500/20 px-1.5 py-0.5 font-mono-tech text-[10px] font-semibold text-amber-200 border border-amber-500/30">
+          SOLDIER
+        </span>
+      </div>
+
+      <div class="mt-2">
+        <div class="flex justify-between text-[11px] font-mono-tech">
+          <span id="remote-driver-label" class="text-slate-400">AI SPARRING BOT (AUTO)</span>
+          <span id="p2-hp-text" class="text-amber-300 font-bold">100 / 100</span>
+        </div>
+        <div class="mt-0.5 h-2 w-full overflow-hidden rounded-full bg-slate-900/90 p-0.5 border border-slate-700/60">
+          <div id="p2-hp-bar" class="h-full rounded-full bg-gradient-to-r from-red-500 to-amber-400 transition-all duration-150" style="width: 100%"></div>
+        </div>
+      </div>
+
+      <div class="mt-2 flex items-center justify-between text-[11px] font-mono-tech">
+        <span class="text-slate-400">SCORE (YOU vs FOE):</span>
+        <span id="match-score" class="text-xs font-bold text-white">0 — 0</span>
+      </div>
+    </div>
+
+    <!-- Real2Sim Environment Cover Legend & Live Feed -->
+    <div class="pointer-events-auto hidden sm:block rounded-xl hud-glass p-2.5 text-[11px]">
+      <div class="flex items-center justify-between font-mono-tech font-bold text-slate-300 mb-1.5">
+        <span>ARGON REAL2SIM MESH LEGEND</span>
+        <button id="btn-reset-cover" type="button" class="text-[10px] text-cyan-400 hover:text-cyan-200 underline">Repair Cover</button>
+      </div>
+      <div class="space-y-1 text-[10px]">
+        <div class="flex items-center justify-between">
+          <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-sm bg-cyan-400"></span>Ceramic Mug / Fruit Bowl</span>
+          <span class="font-mono-tech text-cyan-300">HARD COVER (0% DMG)</span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-sm bg-amber-400"></span>Cereal Box / Milk Carton</span>
+          <span class="font-mono-tech text-amber-300">CARDBOARD (DESTRUCTIBLE)</span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-sm bg-purple-400"></span>The Stitch (Portal Bridge)</span>
+          <span class="font-mono-tech text-purple-300">SE(3) REALM LINK</span>
+        </div>
+      </div>
+      <!-- Live Event Log -->
+      <div id="combat-log" class="mt-2 max-h-20 overflow-y-auto border-t border-slate-800 pt-1.5 font-mono-tech text-[10px] text-slate-300 space-y-0.5 custom-scrollbar">
+        <div class="text-cyan-300">[ARGON] Stitched India Desk ⇄ US Table via Portal Bridge.</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Right Live Telemetry & Network Inspector Mini-Panel -->
+  <aside class="pointer-events-none absolute right-3 top-16 z-20 hidden lg:flex flex-col gap-2 w-64">
+    <div class="pointer-events-auto rounded-xl hud-glass p-3 text-[11px]">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-1.5">
+        <span class="font-mono-tech font-bold text-cyan-300">BACKEND TELEMETRY</span>
+        <span class="rounded bg-emerald-500/20 px-1.5 py-0.5 font-mono-tech text-[9px] text-emerald-300">HAProxy 200 OK</span>
+      </div>
+      <div class="mt-2 space-y-1 font-mono-tech text-[10px]">
+        <div class="flex justify-between">
+          <span class="text-slate-400">Signaling Node:</span>
+          <span class="text-slate-200">Spring-Boot-IN-West</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-slate-400">WebRTC Transport:</span>
+          <span id="telemetry-transport" class="text-emerald-300">RTCDataChannel (UDP)</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-slate-400">Cross-Realm RTT:</span>
+          <span id="telemetry-rtt" class="text-cyan-300">18 ms (Synced)</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-slate-400">Intact Cover Meshes:</span>
+          <span id="telemetry-meshes" class="text-amber-300">12 / 12 Props</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-slate-400">Player Coords (X,Z):</span>
+          <span id="telemetry-coords" class="text-purple-300">(-10.5, 0.0)</span>
+        </div>
+      </div>
+      <div class="mt-2.5 pt-2 border-t border-slate-800 flex items-center justify-between">
+        <span class="text-[10px] text-slate-400">AI Sparring Bot:</span>
+        <button id="btn-quick-ai-toggle" type="button" class="rounded bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 px-2 py-0.5 font-mono-tech text-[10px] font-semibold text-emerald-300 transition">
+          ACTIVE (ON)
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Bottom Interactive Controls & Touch/Action Bar -->
+  <footer class="pointer-events-none absolute bottom-3 left-3 right-3 z-20 flex flex-wrap items-end justify-between gap-2">
+    <!-- On-Screen D-Pad / Movement Controls (Great for Mobile/Tablet or Mouse-Only Testing) -->
+    <div class="pointer-events-auto flex items-center gap-1.5 rounded-xl hud-glass p-2">
+      <div class="grid grid-cols-3 gap-1 w-28">
+        <div></div>
+        <button id="pad-up" type="button" class="flex h-8 items-center justify-center rounded bg-slate-800/90 hover:bg-cyan-600/40 active:bg-cyan-500 text-xs font-bold border border-slate-600/50">W</button>
+        <div></div>
+        <button id="pad-left" type="button" class="flex h-8 items-center justify-center rounded bg-slate-800/90 hover:bg-cyan-600/40 active:bg-cyan-500 text-xs font-bold border border-slate-600/50">A</button>
+        <button id="pad-down" type="button" class="flex h-8 items-center justify-center rounded bg-slate-800/90 hover:bg-cyan-600/40 active:bg-cyan-500 text-xs font-bold border border-slate-600/50">S</button>
+        <button id="pad-right" type="button" class="flex h-8 items-center justify-center rounded bg-slate-800/90 hover:bg-cyan-600/40 active:bg-cyan-500 text-xs font-bold border border-slate-600/50">D</button>
+      </div>
+      <div class="hidden sm:flex flex-col gap-1 text-[10px] font-mono-tech text-slate-300 pl-2 border-l border-slate-700/70">
+        <div><span class="text-cyan-300 font-bold">WASD / Arrows</span>: Move / Drive RC</div>
+        <div><span class="text-cyan-300 font-bold">Mouse + Click / [F]</span>: Aim &amp; Fire</div>
+        <div><span class="text-amber-300 font-bold">[G]</span>: Grenade • <span class="text-purple-300 font-bold">[V]</span>: Morph Soldier/RC</div>
+        <div><span class="text-emerald-300 font-bold">[C]</span>: Crouch Cover / Drift • <span class="text-cyan-300 font-bold">[Shift]</span>: Nitro</div>
+      </div>
+    </div>
+
+    <!-- Action Weapon / Ability Buttons -->
+    <div class="pointer-events-auto flex items-center gap-2 rounded-xl hud-glass p-2">
+      <button id="btn-action-fire" type="button" class="flex flex-col items-center justify-center rounded-lg bg-gradient-to-b from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 active:scale-95 px-3.5 py-2 text-xs font-bold text-white shadow-md shadow-cyan-500/20 border border-cyan-300/40">
+        <span>🔫 FIRE PLASMA</span>
+        <span class="font-mono-tech text-[9px] text-cyan-100">[Click / F]</span>
+      </button>
+
+      <button id="btn-action-grenade" type="button" class="flex flex-col items-center justify-center rounded-lg bg-gradient-to-b from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 active:scale-95 px-3 py-2 text-xs font-bold text-white shadow-md shadow-amber-500/20 border border-amber-300/40">
+        <span>💣 BREACH GRENADE</span>
+        <span id="grenade-cd-label" class="font-mono-tech text-[9px] text-amber-100">READY [G]</span>
+      </button>
+
+      <button id="btn-action-crouch" type="button" class="flex flex-col items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-95 px-3 py-2 text-xs font-semibold text-slate-200 border border-slate-600">
+        <span id="crouch-btn-title">🛡️ TAKE COVER</span>
+        <span class="font-mono-tech text-[9px] text-slate-400">[C] Crouch/Drift</span>
+      </button>
+
+      <button id="btn-action-boost" type="button" class="flex flex-col items-center justify-center rounded-lg bg-purple-700/80 hover:bg-purple-600 active:scale-95 px-3 py-2 text-xs font-semibold text-purple-100 border border-purple-400/40">
+        <span>⚡ NITRO / SPRINT</span>
+        <span class="font-mono-tech text-[9px] text-purple-200">[Shift]</span>
+      </button>
+    </div>
+  </footer>
+
+  <!-- MODAL 1: Live Two-Client WebRTC Signaling & Multiplayer Room -->
+  <div id="modal-webrtc" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4">
+    <div class="w-full max-w-2xl rounded-2xl hud-glass border border-cyan-500/40 p-5 shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div>
+          <h2 class="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+            <span>🌐</span> Live Two-Client WebRTC Multiplayer Hub
+          </h2>
+          <p class="text-xs text-slate-400 mt-0.5">
+            Synchronous Cross-Location State &amp; Trajectory Sync via <code class="text-cyan-300">RTCPeerConnection</code> + <code class="text-cyan-300">RTCDataChannel</code>
+          </p>
+        </div>
+        <button id="btn-close-webrtc" type="button" class="rounded-lg bg-slate-800 hover:bg-slate-700 px-2.5 py-1 text-xs font-bold text-slate-300">✕ ESC</button>
+      </div>
+
+      <div class="mt-4 space-y-4 text-xs">
+        <!-- Role Selection & Instant Multi-Tab Pairing -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div class="rounded-xl bg-slate-900/90 p-3.5 border border-cyan-500/30">
+            <div class="font-mono-tech text-[11px] font-bold text-cyan-300 uppercase">1. Select Your Physical Realm Role</div>
+            <p class="text-[11px] text-slate-400 mt-1">
+              Choose whether this browser client controls the India Desk (Bengaluru) or the US Dining Table (Austin).
+            </p>
+            <div class="mt-2.5 flex gap-2">
+              <button id="btn-role-india" type="button" class="flex-1 rounded-lg bg-cyan-600 px-3 py-2 font-bold text-white border border-cyan-300/50 transition">
+                🇮🇳 India Desk (P1)
+              </button>
+              <button id="btn-role-us" type="button" class="flex-1 rounded-lg bg-slate-800 hover:bg-slate-700 px-3 py-2 font-bold text-amber-300 border border-amber-500/30 transition">
+                🇺🇸 US Table (P2)
+              </button>
+            </div>
+          </div>
+
+          <div class="rounded-xl bg-slate-900/90 p-3.5 border border-emerald-500/30">
+            <div class="font-mono-tech text-[11px] font-bold text-emerald-300 uppercase">2. Zero-Config Multi-Tab Auto-WebRTC</div>
+            <p class="text-[11px] text-slate-400 mt-1">
+              Open this app in two tabs! Our local <code class="text-emerald-300">BroadcastChannel</code> signaling relay automatically completes the WebRTC SDP/ICE handshake.
+            </p>
+            <div class="mt-2.5 flex items-center justify-between gap-2">
+              <button id="btn-rtc-autoconnect" type="button" class="rounded-lg bg-emerald-600 hover:bg-emerald-500 px-3 py-2 font-bold text-white transition">
+                ⚡ Broadcast WebRTC Offer
+              </button>
+              <button id="btn-rtc-ping" type="button" class="rounded-lg bg-slate-800 hover:bg-slate-700 px-2.5 py-2 font-mono-tech text-[11px] text-cyan-300 border border-cyan-500/30">
+                Send Test Ping
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Live Connection Telemetry Box -->
+        <div class="rounded-xl bg-slate-950/90 p-3 border border-slate-800 font-mono-tech text-[11px]">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <span>ICE / Peer State: <strong id="modal-rtc-state" class="text-emerald-400">READY (Auto-Listening)</strong></span>
+            <span>Packets Tx/Rx: <strong id="modal-rtc-packets" class="text-cyan-300">0 / 0</strong></span>
+            <div class="flex items-center gap-2">
+              <span>AI Sparring Bot:</span>
+              <button id="btn-modal-ai-toggle" type="button" class="rounded bg-emerald-500/20 px-2 py-0.5 text-emerald-300 border border-emerald-500/40 font-bold">
+                ENABLED
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Cross-Device Manual SDP Signaling (Copy/Paste Offer & Answer) -->
+        <div class="rounded-xl bg-slate-900/80 p-3.5 border border-slate-800 space-y-2.5">
+          <div class="flex items-center justify-between">
+            <span class="font-mono-tech text-[11px] font-bold text-purple-300 uppercase">3. Cross-Device Manual WebRTC SDP Handshake (No Server Required)</span>
+            <div class="flex gap-1.5">
+              <button id="btn-create-offer" type="button" class="rounded bg-purple-600 hover:bg-purple-500 px-2.5 py-1 font-semibold text-white text-[11px]">
+                1. Generate Offer (Host)
+              </button>
+              <button id="btn-accept-offer" type="button" class="rounded bg-blue-600 hover:bg-blue-500 px-2.5 py-1 font-semibold text-white text-[11px]">
+                2. Accept Offer / Apply Answer
+              </button>
+              <button id="btn-copy-sdp" type="button" class="rounded bg-slate-800 hover:bg-slate-700 px-2.5 py-1 font-mono-tech text-[11px] text-cyan-300 border border-slate-600">
+                Copy Token
+              </button>
+            </div>
+          </div>
+          <textarea id="sdp-textarea" rows="3" placeholder="Click 'Generate Offer' to create a Base64 WebRTC SDP token, or paste a remote peer's Offer/Answer token here and click 'Accept Offer / Apply Answer'..." class="selectable-text w-full rounded-lg bg-slate-950 p-2 font-mono-tech text-[10px] text-slate-200 border border-slate-700 focus:border-cyan-400 focus:outline-none"></textarea>
+          <div id="sdp-feedback" class="text-[11px] text-cyan-300 font-mono-tech">
+            Tip: For instant testing on one computer, open a second tab or keep the AI Sparring Bot enabled!
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL 2: End-to-End Architecture & Production Backend Code Suite -->
+  <div id="modal-arch" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4">
+    <div class="w-full max-w-4xl rounded-2xl hud-glass border border-amber-500/40 p-5 shadow-2xl max-h-[90vh] flex flex-col">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div>
+          <h2 class="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+            <span>🏗️</span> Realm Stitchers — Scaled End-to-End Production Architecture &amp; Code
+          </h2>
+          <p class="text-xs text-slate-400 mt-0.5">
+            Java 21 / Spring Boot 3.3 • Gemini 4 Argon Real2Sim • WebRTC SFU/P2P • HAProxy Global Edge Load Balancer
+          </p>
+        </div>
+        <button id="btn-close-arch" type="button" class="rounded-lg bg-slate-800 hover:bg-slate-700 px-2.5 py-1 text-xs font-bold text-slate-300">✕ ESC</button>
+      </div>
+
+      <!-- Architecture Tabs -->
+      <div class="mt-3 flex flex-wrap gap-1.5 border-b border-slate-800 pb-2.5">
+        <button type="button" data-arch-tab="blueprint" class="arch-tab-btn rounded-lg bg-amber-500/20 border border-amber-400/50 px-3 py-1.5 text-xs font-bold text-amber-300">
+          1. Scaling Blueprint
+        </button>
+        <button type="button" data-arch-tab="springboot" class="arch-tab-btn rounded-lg bg-slate-800/80 hover:bg-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300">
+          2. ArgonReal2SimService.java
+        </button>
+        <button type="button" data-arch-tab="signaling" class="arch-tab-btn rounded-lg bg-slate-800/80 hover:bg-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300">
+          3. WebRtcStitchController.java
+        </button>
+        <button type="button" data-arch-tab="haproxy" class="arch-tab-btn rounded-lg bg-slate-800/80 hover:bg-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300">
+          4. haproxy.cfg &amp; Docker
+        </button>
+        <button id="btn-copy-arch-code" type="button" class="ml-auto rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-400/40 px-3 py-1.5 font-mono-tech text-xs font-semibold text-cyan-300">
+          📋 Copy Active Tab
+        </button>
+      </div>
+
+      <!-- Tab Content Area -->
+      <div id="arch-content-area" class="selectable-text mt-3 flex-1 overflow-y-auto custom-scrollbar rounded-xl bg-slate-950/90 p-4 border border-slate-800 font-mono-tech text-xs leading-relaxed text-slate-200">
+      </div>
+    </div>
+  </div>
+
+  <!-- Application Script -->
+  <script>
+    (function () {
+      'use strict';
+
+      // =========================================================================
+      // 1. SYNTHESIZED WEB AUDIO ENGINE (Zero external audio files required)
+      // =========================================================================
+      const SoundFX = {
+        ctx: null,
+        muted: false,
+        init() {
+          if (!this.ctx) {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (AudioCtx) {
+              this.ctx = new AudioCtx();
+            }
+          }
+          if (this.ctx && this.ctx.state === 'suspended') {
+            this.ctx.resume().catch(() => {});
+          }
+        },
+        playPew(isCar) {
+          if (this.muted) return;
+          this.init();
+          if (!this.ctx) return;
+          const now = this.ctx.currentTime;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = isCar ? 'sawtooth' : 'square';
+          osc.frequency.setValueAtTime(isCar ? 620 : 880, now);
+          osc.frequency.exponentialRampToValueAtTime(110, now + 0.11);
+          gain.gain.setValueAtTime(0.12, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.11);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(now);
+          osc.stop(now + 0.12);
+        },
+        playRicochet() {
+          if (this.muted) return;
+          this.init();
+          if (!this.ctx) return;
+          const now = this.ctx.currentTime;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(1850, now);
+          osc.frequency.exponentialRampToValueAtTime(3200, now + 0.08);
+          gain.gain.setValueAtTime(0.14, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(now);
+          osc.stop(now + 0.095);
+        },
+        playCardboardHit(destroyed) {
+          if (this.muted) return;
+          this.init();
+          if (!this.ctx) return;
+          const now = this.ctx.currentTime;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(destroyed ? 180 : 280, now);
+          osc.frequency.exponentialRampToValueAtTime(45, now + (destroyed ? 0.28 : 0.12));
+          gain.gain.setValueAtTime(destroyed ? 0.22 : 0.14, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + (destroyed ? 0.29 : 0.13));
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(now);
+          osc.stop(now + (destroyed ? 0.3 : 0.14));
+        },
+        playMorph() {
+          if (this.muted) return;
+          this.init();
+          if (!this.ctx) return;
+          const now = this.ctx.currentTime;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(240, now);
+          osc.frequency.exponentialRampToValueAtTime(740, now + 0.18);
+          gain.gain.setValueAtTime(0.15, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.19);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(now);
+          osc.stop(now + 0.2);
+        },
+        playPortalCross() {
+          if (this.muted) return;
+          this.init();
+          if (!this.ctx) return;
+          const now = this.ctx.currentTime;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(440, now);
+          osc.frequency.exponentialRampToValueAtTime(880, now + 0.22);
+          gain.gain.setValueAtTime(0.1, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(now);
+          osc.stop(now + 0.25);
+        }
+      };
+
+      // =========================================================================
+      // 2. ARCHITECTURE & PRODUCTION CODE SUITE CONTENT
+      // =========================================================================
+      const ARCH_TABS = {
+        blueprint: `REALM STITCHERS — GLOBAL CROSS-REALITY MULTIPLAYER SCALING BLUEPRINT
+================================================================================
+
+1. DUAL-REALM INGESTION & HAProxy GEO-EDGE LOAD BALANCING
+   • India Client (Bengaluru) & US Client (Austin) stream 30fps keyframes + ARCore/ARKit
+     VIO camera poses to the nearest HAProxy Anycast PoP (ap-south-1 & us-central1).
+   • HAProxy splits traffic by workload:
+     - Heavy Multipart Video/Depth Payloads (/api/v1/argon/scan) -> Routed via leastconn
+       to GPU-backed Spring Boot Real2Sim Worker Pods.
+     - Low-Latency WebRTC Signaling & Fallback Relay (/ws/stitch-signaling) -> Routed via
+       consistent room-ID hashing to stateful Spring Boot Signaling Pods.
+
+2. GEMINI 4 ARGON "REAL2SIM" SEMANTIC 3D RECONSTRUCTION PIPELINE
+   • Input: Dual 5-second pan across Desk (India) & Dining Table (US).
+   • Step A (Metric Scale Normalization): Uses known reference objects (standard 80mm
+     ceramic mug, 355ml soda can, standard keyboard pitch) to normalize both worlds
+     into 1:24 Miniature Combat Scale (1 game unit = 2.5 cm physical).
+   • Step B (Material & Ballistic Classification):
+     - CERAMIC / METAL / STONE -> Hard Cover ( restitution: 0.85, bulletPenetration: 0.0,
+       ricochetSparks: true, indestructible: true ).
+     - CARDBOARD / PAPER / THIN_PLASTIC -> Destructible Cover ( hp: 100..250,
+       debrisFragments: 14, stageDeformation: true ).
+   • Step C (SE(3) Portal Bridge Alignment):
+     - Detects the physical table cliff edge plane n_1•x + d_1 = 0 in Bengaluru and
+       n_2•x + d_2 = 0 in Austin.
+     - Computes rigid transformation matrix T_{IN->US} = [R | t] and spawns the
+       4-meter virtual "Argon Portal Bridge" linking the two boundary edges.
+
+3. HYBRID WEBRTC DATA-CHANNEL + AUTHORITATIVE SPRING BOOT VERIFICATION
+   • Fast Path (P2P WebRTC DataChannel, ordered=false, maxRetransmits=0):
+     - 30Hz state packets: [playerRole, mode(SOLDIER|RC_CAR), x, y, z, yaw, vx, vz, crouching]
+     - Sub-20ms local interpolation + client-side dead reckoning across continents.
+   • Reliable Event Channel (ordered=true):
+     - Projectile spawns, Breach Grenade arcs, Cardboard Cover HP deltas, Mode Morphs.`,
+
+        springboot: `// File: src/main/java/com/realmstitchers/argon/ArgonReal2SimService.java
+package com.realmstitchers.argon;
+
+import org.springframework.stereotype.Service;
+import java.util.List;
+import java.util.UUID;
+
+@Service
+public class ArgonReal2SimService {
+
+    public record SemanticPropMesh(
+        String propId,
+        String label,
+        String materialClass, // "CERAMIC", "CARDBOARD", "METAL", "PLASTIC"
+        boolean hardCover,
+        int maxHitPoints,
+        double[] boundingBoxCenter,
+        double[] boundingBoxExtents
+    ) {}
+
+    public record StitchedBattlegroundPayload(
+        String roomId,
+        List<SemanticPropMesh> indiaDeskProps,
+        List<SemanticPropMesh> usTableProps,
+        double[] portalBridgeTransformMatrix
+    ) {}
+
+    /**
+     * Processes dual smartphone scan streams via Gemini 4 Argon Real2Sim Vision API
+     * and generates a unified SE(3)-aligned cross-reality collision scene.
+     */
+    public StitchedBattlegroundPayload synthesizeStitchedArena(
+            String roomId, byte[] indiaScanFrames, byte[] usScanFrames) {
+
+        List<SemanticPropMesh> indiaProps = List.of(
+            new SemanticPropMesh("in-mug-01", "Coffee Mug", "CERAMIC", true, 999999,
+                new double[]{-8.5, 1.3, -3.2}, new double[]{2.1, 2.6, 2.1}),
+            new SemanticPropMesh("in-kbd-01", "Mechanical Keyboard", "ABS_PLASTIC", false, 240,
+                new double[]{-11.8, 0.45, 2.2}, new double[]{2.2, 0.9, 5.2}),
+            new SemanticPropMesh("in-mon-01", "Ultrawide Monitor", "ALUMINUM_GLASS", true, 999999,
+                new double[]{-15.5, 2.8, 0.0}, new double[]{1.4, 5.5, 8.4})
+        );
+
+        List<SemanticPropMesh> usProps = List.of(
+            new SemanticPropMesh("us-cereal-01", "Crunch-Os Cereal Box", "CARDBOARD", false, 150,
+                new double[]{8.0, 2.1, 3.0}, new double[]{1.6, 4.2, 2.8}),
+            new SemanticPropMesh("us-bowl-01", "Fruit Bowl", "CERAMIC_WOOD", true, 999999,
+                new double[]{8.5, 1.1, -3.5}, new double[]{2.8, 2.2, 2.8}),
+            new SemanticPropMesh("us-milk-01", "Milk Carton", "WAXED_CARDBOARD", false, 120,
+                new double[]{11.5, 1.6, 5.2}, new double[]{1.5, 3.2, 1.5})
+        );
+
+        // SE(3) Portal Bridge connecting x = -3.0 (India Desk Edge) to x = +3.0 (US Table Edge)
+        double[] portalMatrix = new double[]{
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            0, 0, 0, 1
+        };
+
+        return new StitchedBattlegroundPayload(roomId, indiaProps, usProps, portalMatrix);
+    }
+}`,
+
+        signaling: `// File: src/main/java/com/realmstitchers/net/WebRtcStitchController.java
+package com.realmstitchers.net;
+
+import org.springframework.messaging.handler.annotation.DestinationVariable;
+import org.springframework.messaging.handler.annotation.MessageMapping;
+import org.springframework.messaging.handler.annotation.SendTo;
+import org.springframework.stereotype.Controller;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
+@Controller
+public class WebRtcStitchController {
+
+    private final Map<String, Map<String, Integer>> roomCoverHpState = new ConcurrentHashMap<>();
+
+    /**
+     * Low-latency WebRTC SDP Offer/Answer & ICE Candidate exchange across continents.
+     */
+    @MessageMapping("/room/{roomId}/signal")
+    @SendTo("/topic/room/{roomId}/signal")
+    public Map<String, Object> relayWebRtcSignal(
+            @DestinationVariable String roomId,
+            Map<String, Object> signalPayload) {
+        signalPayload.put("serverTimestampNs", System.nanoTime());
+        return signalPayload;
+    }
+
+    /**
+     * Authoritative destruction verification for Cardboard vs Ceramic cover hits.
+     */
+    @MessageMapping("/room/{roomId}/cover-damage")
+    @SendTo("/topic/room/{roomId}/cover-sync")
+    public Map<String, Object> applyBallisticDamage(
+            @DestinationVariable String roomId,
+            Map<String, Object> hitEvent) {
+        String propId = (String) hitEvent.get("propId");
+        String material = (String) hitEvent.get("material");
+        int damage = ((Number) hitEvent.getOrDefault("damage", 25)).intValue();
+
+        if ("CERAMIC".equals(material) || "METAL".equals(material)) {
+            return Map.of("propId", propId, "ricochet", true, "remainingHp", 999999);
+        }
+
+        var roomMap = roomCoverHpState.computeIfAbsent(roomId, k -> new ConcurrentHashMap<>());
+        int remaining = Math.max(0, roomMap.getOrDefault(propId, 150) - damage);
+        roomMap.put(propId, remaining);
+
+        return Map.of(
+            "propId", propId,
+            "ricochet", false,
+            "remainingHp", remaining,
+            "destroyed", remaining == 0
+        );
+    }
+}`,
+
+        haproxy: `# File: deploy/haproxy.cfg — Global Cross-Continental Mesh & WebRTC Load Balancer
+global
+    maxconn 50000
+    log stdout format raw local0 info
+
+defaults
+    mode http
+    timeout connect 5s
+    timeout client  60s
+    timeout server  60s
+    timeout tunnel  3600s
+
+frontend realm_stitchers_edge
+    bind *:8080
+    # Route heavy Argon Real2Sim video scan uploads to GPU mesh workers
+    acl is_argon_scan path_beg /api/v1/argon/scan
+    # Route WebRTC signaling & STOMP/WebSocket sync with sticky room routing
+    acl is_webrtc_ws  path_beg /ws/stitch-signaling
+
+    use_backend argon_real2sim_gpu_pool if is_argon_scan
+    use_backend spring_webrtc_signaling if is_webrtc_ws
+    default_backend spring_webrtc_signaling
+
+backend argon_real2sim_gpu_pool
+    balance leastconn
+    http-request set-header X-Argon-Pipeline "Gemini-4-Real2Sim-v2"
+    server argon-in-blr1 10.20.1.11:8081 check maxconn 200
+    server argon-us-aus1 10.30.1.11:8081 check maxconn 200
+
+backend spring_webrtc_signaling
+    balance uri
+    hash-type consistent
+    server boot-sig-1 10.20.2.10:8080 check
+    server boot-sig-2 10.30.2.10:8080 check`
+      };
+
+      // =========================================================================
+      // 3. GAME STATE & CONFIGURATION
+      // =========================================================================
+      const GAME_STATE = {
+        localRole: 'INDIA', // 'INDIA' (P1 Left) or 'US' (P2 Right)
+        mode: 'SOLDIER',    // 'SOLDIER' or 'RC_CAR'
+        semanticVision: true,
+        cameraViewIndex: 0, // 0: Chase, 1: Overhead Tactical, 2: Bridge Side
+        aiEnabled: true,
+        scoreP1: 0,
+        scoreP2: 0,
+        grenadeCooldown: 0,
+        lastFireTime: 0,
+        scanning: false,
+        packetsTx: 0,
+        packetsRx: 0,
+        rtcConnected: false,
+        lastRemotePacketTime: 0
+      };
+
+      const PLAYER_1 = {
+        id: 'P1',
+        x: -10.5,
+        y: 0,
+        z: 0.0,
+        vx: 0,
+        vz: 0,
+        yaw: 0,
+        speed: 0,
+        hp: 100,
+        maxHp: 100,
+        energy: 100,
+        mode: 'SOLDIER',
+        crouching: false,
+        boosting: false,
+        currentRealm: 'INDIA DESK',
+        coverState: 'EXPOSED'
+      };
+
+      const PLAYER_2 = {
+        id: 'P2',
+        x: 10.5,
+        y: 0,
+        z: 0.5,
+        vx: 0,
+        vz: 0,
+        yaw: Math.PI,
+        speed: 0,
+        hp: 100,
+        maxHp: 100,
+        mode: 'SOLDIER',
+        crouching: false,
+        aiTimer: 0,
+        aiFireTimer: 0,
+        aiTargetX: 7.2,
+        aiTargetZ: 2.8,
+        aiMorphTimer: 8.0
+      };
+
+      const INPUT = {
+        w: false,
+        a: false,
+        s: false,
+        d: false,
+        shift: false,
+        crouch: false,
+        firing: false,
+        aimWorldX: 0,
+        aimWorldZ: 0
+      };
+
+      // UI Helper Logging
+      const combatLogEl = document.getElementById('combat-log');
+      function addCombatLog(msg, colorClass) {
+        if (!combatLogEl) return;
+        const line = document.createElement('div');
+        line.className = colorClass || 'text-slate-300';
+        line.textContent = msg;
+        combatLogEl.prepend(line);
+        while (combatLogEl.children.length > 18) {
+          combatLogEl.removeChild(combatLogEl.lastChild);
+        }
+      }
+
+      // =========================================================================
+      // 4. PROCEDURAL CANVAS TEXTURES FOR THREE.JS (No external image URLs needed)
+      // =========================================================================
+      function createDeskWoodTexture() {
+        const c = document.createElement('canvas');
+        c.width = 512;
+        c.height = 512;
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = '#1e1b24';
+        ctx.fillRect(0, 0, 512, 512);
+        // Subtle carbon/walnut desk grain + tech grid
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.12)';
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= 512; i += 32) {
+          ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 512); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(512, i); ctx.stroke();
+        }
+        ctx.fillStyle = 'rgba(56, 189, 248, 0.18)';
+        ctx.font = 'bold 20px monospace';
+        ctx.fillText('REALM ALPHA // BENGALURU DESK MESH', 24, 480);
+        return new THREE.CanvasTexture(c);
+      }
+
+      function createDiningTableTexture() {
+        const c = document.createElement('canvas');
+        c.width = 512;
+        c.height = 512;
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = '#3b2618';
+        ctx.fillRect(0, 0, 512, 512);
+        // Warm wood grain stripes
+        ctx.fillStyle = 'rgba(251, 191, 36, 0.06)';
+        for (let y = 0; y < 512; y += 16) {
+          ctx.fillRect(0, y, 512, 6);
+        }
+        ctx.strokeStyle = 'rgba(251, 191, 36, 0.16)';
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= 512; i += 32) {
+          ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 512); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(512, i); ctx.stroke();
+        }
+        ctx.fillStyle = 'rgba(251, 191, 36, 0.25)';
+        ctx.font = 'bold 20px monospace';
+        ctx.fillText('REALM OMEGA // AUSTIN DINING TABLE', 24, 480);
+        return new THREE.CanvasTexture(c);
+      }
+
+      function createCerealBoxTexture() {
+        const c = document.createElement('canvas');
+        c.width = 256;
+        c.height = 256;
+        const ctx = c.getContext('2d');
+        const grad = ctx.createLinearGradient(0, 0, 0, 256);
+        grad.addColorStop(0, '#f59e0b');
+        grad.addColorStop(1, '#dc2626');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 256, 256);
+        ctx.fillStyle = '#fef08a';
+        ctx.font = '900 30px sans-serif';
+        ctx.fillText('CRUNCH-O', 26, 70);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 18px monospace';
+        ctx.fillText('CARDBOARD COVER', 30, 110);
+        ctx.beginPath();
+        ctx.arc(128, 175, 42, 0, Math.PI * 2);
+        ctx.fillStyle = '#fde047';
+        ctx.fill();
+        ctx.lineWidth = 5;
+        ctx.strokeStyle = '#7c2d12';
+        ctx.stroke();
+        return new THREE.CanvasTexture(c);
+      }
+
+      function createBridgeTexture() {
+        const c = document.createElement('canvas');
+        c.width = 256;
+        c.height = 128;
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = '#090d1e';
+        ctx.fillRect(0, 0, 256, 128);
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(2, 2, 252, 124);
+        ctx.strokeStyle = 'rgba(192, 132, 252, 0.65)';
+        ctx.lineWidth = 4;
+        for (let x = 16; x < 256; x += 36) {
+          ctx.beginPath();
+          ctx.moveTo(x, 20);
+          ctx.lineTo(x + 18, 64);
+          ctx.lineTo(x, 108);
+          ctx.stroke();
+        }
+        return new THREE.CanvasTexture(c);
+      }
+
+      // =========================================================================
+      // 5. THREE.JS SCENE, CAMERA & RENDERER INITIALIZATION
+      // =========================================================================
+      const container = document.getElementById('canvas-container');
+      const labelsContainer = document.getElementById('labels-container');
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x060913);
+      scene.fog = new THREE.FogExp2(0x060913, 0.012);
+
+      const camera = new THREE.PerspectiveCamera(
+        52,
+        Math.max(1, container.clientWidth) / Math.max(1, container.clientHeight),
+        0.1,
+        200
+      );
+      camera.position.set(-19, 14, 15);
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+      renderer.setSize(Math.max(1, container.clientWidth), Math.max(1, container.clientHeight));
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      container.appendChild(renderer.domElement);
+
+      // Lighting
+      const ambientLight = new THREE.AmbientLight(0xdbeafe, 0.68);
+      scene.add(ambientLight);
+
+      // Cool Cyan Key Light over India Desk
+      const indiaLight = new THREE.DirectionalLight(0x38bdf8, 0.85);
+      indiaLight.position.set(-14, 22, 10);
+      indiaLight.castShadow = true;
+      indiaLight.shadow.mapSize.width = 1024;
+      indiaLight.shadow.mapSize.height = 1024;
+      scene.add(indiaLight);
+
+      // Warm Amber Key Light over US Dining Table
+      const usLight = new THREE.DirectionalLight(0xfbbf24, 0.85);
+      usLight.position.set(14, 22, 10);
+      usLight.castShadow = true;
+      scene.add(usLight);
+
+      // Portal Bridge Point Light
+      const portalLight = new THREE.PointLight(0xc084fc, 1.6, 16);
+      portalLight.position.set(0, 3.0, 0);
+      scene.add(portalLight);
+
+      // Background Starfield / AR Point Cloud Particles
+      const starGeo = new THREE.BufferGeometry();
+      const starCount = 350;
+      const starPos = new Float32Array(starCount * 3);
+      for (let i = 0; i < starCount; i++) {
+        starPos[i * 3] = (Math.random() - 0.5) * 90;
+        starPos[i * 3 + 1] = (Math.random() - 0.2) * 35;
+        starPos[i * 3 + 2] = (Math.random() - 0.5) * 60;
+      }
+      starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+      const starMat = new THREE.PointsMaterial({ color: 0x38bdf8, size: 0.18, transparent: true, opacity: 0.5 });
+      const starPoints = new THREE.Points(starGeo, starMat);
+      scene.add(starPoints);
+
+      // =========================================================================
+      // 6. BUILD REALM 1 (INDIA DESK), THE STITCH (PORTAL BRIDGE), REALM 2 (US TABLE)
+      // =========================================================================
+      const deskTex = createDeskWoodTexture();
+      const tableTex = createDiningTableTexture();
+      const cerealTex = createCerealBoxTexture();
+      const bridgeTex = createBridgeTexture();
+
+      // Platform 1: India Developer Desk (x from -19 to -3, width 16, depth 20)
+      const indiaDeskGroup = new THREE.Group();
+      const indiaDeskGeo = new THREE.BoxGeometry(16, 1.2, 20);
+      const indiaDeskMat = new THREE.MeshStandardMaterial({ map: deskTex, roughness: 0.45, metalness: 0.2 });
+      const indiaDeskMesh = new THREE.Mesh(indiaDeskGeo, indiaDeskMat);
+      indiaDeskMesh.position.set(-11, -0.6, 0);
+      indiaDeskMesh.receiveShadow = true;
+      indiaDeskGroup.add(indiaDeskMesh);
+
+      // Glowing Neon Cyan Trim on India Desk Edge
+      const indiaTrimGeo = new THREE.BoxGeometry(16.15, 0.16, 20.15);
+      const indiaTrimMat = new THREE.MeshBasicMaterial({ color: 0x06b6d4 });
+      const indiaTrim = new THREE.Mesh(indiaTrimGeo, indiaTrimMat);
+      indiaTrim.position.set(-11, -0.05, 0);
+      indiaDeskGroup.add(indiaTrim);
+      scene.add(indiaDeskGroup);
+
+      // Platform 2: US Dining Table (x from +3 to +19, width 16, depth 20)
+      const usTableGroup = new THREE.Group();
+      const usTableGeo = new THREE.BoxGeometry(16, 1.2, 20);
+      const usTableMat = new THREE.MeshStandardMaterial({ map: tableTex, roughness: 0.55, metalness: 0.1 });
+      const usTableMesh = new THREE.Mesh(usTableGeo, usTableMat);
+      usTableMesh.position.set(11, -0.6, 0);
+      usTableMesh.receiveShadow = true;
+      usTableGroup.add(usTableMesh);
+
+      // Warm Amber Trim on US Dining Table Edge
+      const usTrimGeo = new THREE.BoxGeometry(16.15, 0.16, 20.15);
+      const usTrimMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
+      const usTrim = new THREE.Mesh(usTrimGeo, usTrimMat);
+      usTrim.position.set(11, -0.05, 0);
+      usTableGroup.add(usTrim);
+      scene.add(usTableGroup);
+
+      // Platform 3: The Stitch ("Argon Portal Bridge", x from -3 to +3, width 6, depth 6.6)
+      const bridgeGroup = new THREE.Group();
+      const bridgeGeo = new THREE.BoxGeometry(6.2, 0.35, 6.6);
+      const bridgeMat = new THREE.MeshStandardMaterial({
+        map: bridgeTex,
+        emissive: 0x3b0764,
+        emissiveIntensity: 0.65,
+        transparent: true,
+        opacity: 0.92
+      });
+      const bridgeMesh = new THREE.Mesh(bridgeGeo, bridgeMat);
+      bridgeMesh.position.set(0, -0.15, 0);
+      bridgeGroup.add(bridgeMesh);
+
+      // Twin Portal Arch Rings at x = -3 (India Exit) and x = +3 (US Entry)
+      const portalRingGeo = new THREE.TorusGeometry(3.4, 0.14, 12, 48, Math.PI);
+      const portalRingMatLeft = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
+      const portalRingLeft = new THREE.Mesh(portalRingGeo, portalRingMatLeft);
+      portalRingLeft.rotation.y = Math.PI / 2;
+      portalRingLeft.position.set(-3.0, 0.1, 0);
+      bridgeGroup.add(portalRingLeft);
+
+      const portalRingMatRight = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
+      const portalRingRight = new THREE.Mesh(portalRingGeo, portalRingMatRight);
+      portalRingRight.rotation.y = Math.PI / 2;
+      portalRingRight.position.set(3.0, 0.1, 0);
+      bridgeGroup.add(portalRingRight);
+
+      // Side Energy Guardrails on the Bridge
+      const railGeo = new THREE.BoxGeometry(6.0, 0.45, 0.14);
+      const railMat = new THREE.MeshBasicMaterial({ color: 0xc084fc, transparent: true, opacity: 0.75 });
+      const railNorth = new THREE.Mesh(railGeo, railMat);
+      railNorth.position.set(0, 0.25, -3.25);
+      const railSouth = new THREE.Mesh(railGeo, railMat);
+      railSouth.position.set(0, 0.25, 3.25);
+      bridgeGroup.add(railNorth, railSouth);
+      scene.add(bridgeGroup);
+
+      // =========================================================================
+      // 7. PRE-GENERATED SEMANTIC 3D PROPS (HARD COVER VS DESTRUCTIBLE COVER)
+      // =========================================================================
+      const PROPS = [];
+
+      function registerProp(config) {
+        const group = new THREE.Group();
+        group.position.set(config.x, 0, config.z);
+        config.buildGeometry(group);
+
+        // Semantic Bounding Wireframe Box (Shown when Argon Semantic Vision is ON)
+        const wireGeo = new THREE.BoxGeometry(config.rx * 2, config.height, config.rz * 2);
+        const wireEdges = new THREE.EdgesGeometry(wireGeo);
+        const wireColor = config.hardCover ? 0x22d3ee : 0xfbbf24;
+        const wireMat = new THREE.LineBasicMaterial({ color: wireColor, transparent: true, opacity: 0.85 });
+        const wireBox = new THREE.LineSegments(wireEdges, wireMat);
+        wireBox.position.y = config.height / 2;
+        group.add(wireBox);
+
+        scene.add(group);
+
+        // Create Floating HTML Semantic Tag
+        const labelEl = document.createElement('div');
+        labelEl.className = 'semantic-label rounded px-1.5 py-0.5 font-mono-tech text-[10px] font-bold shadow border transition-opacity';
+        if (config.hardCover) {
+          labelEl.style.background = 'rgba(8, 51, 68, 0.85)';
+          labelEl.style.borderColor = 'rgba(34, 211, 238, 0.6)';
+          labelEl.style.color = '#67e8f9';
+        } else {
+          labelEl.style.background = 'rgba(69, 26, 3, 0.88)';
+          labelEl.style.borderColor = 'rgba(251, 191, 36, 0.65)';
+          labelEl.style.color = '#fde68a';
+        }
+        labelsContainer.appendChild(labelEl);
+
+        const propObj = {
+          id: config.id,
+          name: config.name,
+          realm: config.realm,
+          material: config.material,
+          hardCover: config.hardCover,
+          hp: config.maxHp,
+          maxHp: config.maxHp,
+          x: config.x,
+          z: config.z,
+          rx: config.rx,
+          rz: config.rz,
+          height: config.height,
+          group,
+          wireBox,
+          labelEl,
+          destroyed: false
+        };
+
+        updatePropLabel(propObj);
+        PROPS.push(propObj);
+      }
+
+      function updatePropLabel(p) {
+        if (p.destroyed) {
+          p.labelEl.style.display = 'none';
+          return;
+        }
+        p.labelEl.style.display = GAME_STATE.semanticVision ? 'block' : 'none';
+        if (p.hardCover) {
+          p.labelEl.innerHTML = `${p.name} <span style="opacity:0.8">[${p.material} • HARD COVER]</span>`;
+        } else {
+          const pct = Math.max(0, Math.round((p.hp / p.maxHp) * 100));
+          p.labelEl.innerHTML = `${p.name} <span style="opacity:0.9">[${p.material} • ${pct}% HP]</span>`;
+        }
+      }
+
+      function buildAllSemanticProps() {
+        // --- INDIA DESK PROPS ---
+        // 1. Ceramic Coffee Mug (Primary Hard Cover on India Desk)
+        registerProp({
+          id: 'in-coffee-mug',
+          name: 'Coffee Mug',
+          realm: 'INDIA',
+          material: 'CERAMIC',
+          hardCover: true,
+          maxHp: 999999,
+          x: -7.5,
+          z: -2.8,
+          rx: 1.35,
+          rz: 1.35,
+          height: 2.7,
+          buildGeometry(g) {
+            const mugBody = new THREE.Mesh(
+              new THREE.CylinderGeometry(1.15, 1.05, 2.5, 24),
+              new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.2, metalness: 0.1 })
+            );
+            mugBody.position.y = 1.25;
+            mugBody.castShadow = true;
+            const coffeeTop = new THREE.Mesh(
+              new THREE.CylinderGeometry(1.02, 1.02, 0.1, 20),
+              new THREE.MeshStandardMaterial({ color: 0x3e1f0d, roughness: 0.3 })
+            );
+            coffeeTop.position.y = 2.46;
+            const handle = new THREE.Mesh(
+              new THREE.TorusGeometry(0.62, 0.16, 10, 20, Math.PI),
+              new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.25 })
+            );
+            handle.rotation.z = Math.PI / 2;
+            handle.position.set(-1.1, 1.25, 0);
+            g.add(mugBody, coffeeTop, handle);
+          }
+        });
+
+        // 2. Mechanical RGB Keyboard (Destructible / Medium Cover on India Desk)
+        registerProp({
+          id: 'in-keyboard',
+          name: 'Mechanical Keyboard',
+          realm: 'INDIA',
+          material: 'ABS PLASTIC',
+          hardCover: false,
+          maxHp: 220,
+          x: -9.8,
+          z: 3.2,
+          rx: 1.3,
+          rz: 2.6,
+          height: 1.1,
+          buildGeometry(g) {
+            const base = new THREE.Mesh(
+              new THREE.BoxGeometry(2.3, 0.7, 5.0),
+              new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.4, metalness: 0.5 })
+            );
+            base.position.y = 0.35;
+            base.castShadow = true;
+            const rgbStrip = new THREE.Mesh(
+              new THREE.BoxGeometry(2.36, 0.14, 5.06),
+              new THREE.MeshBasicMaterial({ color: 0xec4899 })
+            );
+            rgbStrip.position.y = 0.18;
+            g.add(base, rgbStrip);
+          }
+        });
+
+        // 3. Ultrawide Curved Monitor (Back Hard Cover on India Desk)
+        registerProp({
+          id: 'in-monitor',
+          name: '4K Coding Monitor',
+          realm: 'INDIA',
+          material: 'ALUMINUM/GLASS',
+          hardCover: true,
+          maxHp: 999999,
+          x: -16.2,
+          z: 0.0,
+          rx: 1.0,
+          rz: 4.5,
+          height: 4.6,
+          buildGeometry(g) {
+            const stand = new THREE.Mesh(
+              new THREE.CylinderGeometry(0.35, 0.65, 2.2, 16),
+              new THREE.MeshStandardMaterial({ color: 0x64748b, metalness: 0.8, roughness: 0.2 })
+            );
+            stand.position.y = 1.1;
+            const screen = new THREE.Mesh(
+              new THREE.BoxGeometry(0.5, 3.2, 8.8),
+              new THREE.MeshStandardMaterial({ color: 0x0f172a, emissive: 0x0ea5e9, emissiveIntensity: 0.25 })
+            );
+            screen.position.set(0.2, 2.9, 0);
+            screen.castShadow = true;
+            g.add(stand, screen);
+          }
+        });
+
+        // 4. Tech Hardcover Book Stack (Destructible Paper Cover on India Desk)
+        registerProp({
+          id: 'in-books',
+          name: 'Tech Book Stack',
+          realm: 'INDIA',
+          material: 'PAPER/CARDBOARD',
+          hardCover: false,
+          maxHp: 150,
+          x: -6.4,
+          z: 5.5,
+          rx: 1.3,
+          rz: 1.6,
+          height: 1.8,
+          buildGeometry(g) {
+            const b1 = new THREE.Mesh(
+              new THREE.BoxGeometry(2.4, 0.55, 3.0),
+              new THREE.MeshStandardMaterial({ color: 0x2563eb })
+            );
+            b1.position.y = 0.28;
+            const b2 = new THREE.Mesh(
+              new THREE.BoxGeometry(2.2, 0.55, 2.8),
+              new THREE.MeshStandardMaterial({ color: 0x7c3aed })
+            );
+            b2.position.set(0.1, 0.85, -0.1);
+            const b3 = new THREE.Mesh(
+              new THREE.BoxGeometry(2.1, 0.55, 2.6),
+              new THREE.MeshStandardMaterial({ color: 0x059669 })
+            );
+            b3.position.set(-0.1, 1.4, 0.05);
+            g.add(b1, b2, b3);
+          }
+        });
+
+        // 5. Wireless Gaming Mouse (Destructible Prop on India Desk)
+        registerProp({
+          id: 'in-mouse',
+          name: 'Gaming Mouse',
+          realm: 'INDIA',
+          material: 'PLASTIC',
+          hardCover: false,
+          maxHp: 110,
+          x: -11.5,
+          z: -6.2,
+          rx: 1.1,
+          rz: 0.9,
+          height: 1.0,
+          buildGeometry(g) {
+            const body = new THREE.Mesh(
+              new THREE.BoxGeometry(2.0, 0.85, 1.4),
+              new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.4 })
+            );
+            body.position.y = 0.42;
+            g.add(body);
+          }
+        });
+
+        // --- US DINING TABLE PROPS ---
+        // 6. Cereal Box "Crunch-O's" (Signature Destructible Cardboard Cover on US Table)
+        registerProp({
+          id: 'us-cereal-box',
+          name: 'Cereal Box',
+          realm: 'US',
+          material: 'CARDBOARD',
+          hardCover: false,
+          maxHp: 150,
+          x: 7.4,
+          z: 2.6,
+          rx: 1.1,
+          rz: 1.85,
+          height: 3.6,
+          buildGeometry(g) {
+            const box = new THREE.Mesh(
+              new THREE.BoxGeometry(1.8, 3.5, 3.4),
+              new THREE.MeshStandardMaterial({ map: cerealTex, roughness: 0.7 })
+            );
+            box.position.y = 1.75;
+            box.castShadow = true;
+            g.add(box);
+          }
+        });
+
+        // 7. Fruit Bowl (Signature Hard Cover on US Dining Table)
+        registerProp({
+          id: 'us-fruit-bowl',
+          name: 'Fruit Bowl',
+          realm: 'US',
+          material: 'CERAMIC/WOOD',
+          hardCover: true,
+          maxHp: 999999,
+          x: 7.8,
+          z: -3.2,
+          rx: 1.65,
+          rz: 1.65,
+          height: 2.1,
+          buildGeometry(g) {
+            const bowl = new THREE.Mesh(
+              new THREE.CylinderGeometry(1.6, 0.95, 1.35, 24),
+              new THREE.MeshStandardMaterial({ color: 0xfef3c7, roughness: 0.25 })
+            );
+            bowl.position.y = 0.68;
+            bowl.castShadow = true;
+            // Apples & Oranges inside bowl
+            const apple1 = new THREE.Mesh(
+              new THREE.SphereGeometry(0.52, 14, 14),
+              new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.3 })
+            );
+            apple1.position.set(-0.4, 1.45, 0.3);
+            const orange1 = new THREE.Mesh(
+              new THREE.SphereGeometry(0.54, 14, 14),
+              new THREE.MeshStandardMaterial({ color: 0xf97316, roughness: 0.35 })
+            );
+            orange1.position.set(0.45, 1.48, -0.25);
+            const apple2 = new THREE.Mesh(
+              new THREE.SphereGeometry(0.48, 14, 14),
+              new THREE.MeshStandardMaterial({ color: 0x84cc16, roughness: 0.3 })
+            );
+            apple2.position.set(0.0, 1.65, 0.45);
+            g.add(bowl, apple1, orange1, apple2);
+          }
+        });
+
+        // 8. Milk Carton (Destructible Waxed Cardboard Cover on US Table)
+        registerProp({
+          id: 'us-milk-carton',
+          name: 'Milk Carton',
+          realm: 'US',
+          material: 'CARDBOARD',
+          hardCover: false,
+          maxHp: 125,
+          x: 11.2,
+          z: 5.5,
+          rx: 1.1,
+          rz: 1.1,
+          height: 3.1,
+          buildGeometry(g) {
+            const carton = new THREE.Mesh(
+              new THREE.BoxGeometry(1.9, 2.5, 1.9),
+              new THREE.MeshStandardMaterial({ color: 0xe0f2fe, roughness: 0.5 })
+            );
+            carton.position.y = 1.25;
+            const roof = new THREE.Mesh(
+              new THREE.ConeGeometry(1.35, 0.8, 4),
+              new THREE.MeshStandardMaterial({ color: 0x0284c7 })
+            );
+            roof.rotation.y = Math.PI / 4;
+            roof.position.y = 2.9;
+            g.add(carton, roof);
+          }
+        });
+
+        // 9. Retro Chrome Toaster (Hard Cover on US Table)
+        registerProp({
+          id: 'us-toaster',
+          name: 'Chrome Toaster',
+          realm: 'US',
+          material: 'STAINLESS STEEL',
+          hardCover: true,
+          maxHp: 999999,
+          x: 15.2,
+          z: -0.4,
+          rx: 1.3,
+          rz: 2.1,
+          height: 2.3,
+          buildGeometry(g) {
+            const body = new THREE.Mesh(
+              new THREE.BoxGeometry(2.4, 2.1, 3.8),
+              new THREE.MeshStandardMaterial({ color: 0xcbd5e1, metalness: 0.85, roughness: 0.18 })
+            );
+            body.position.y = 1.05;
+            body.castShadow = true;
+            g.add(body);
+          }
+        });
+
+        // 10. Paper Napkin Holder (Destructible Cover on US Table)
+        registerProp({
+          id: 'us-napkins',
+          name: 'Napkin Stack',
+          realm: 'US',
+          material: 'PAPER/CARDBOARD',
+          hardCover: false,
+          maxHp: 95,
+          x: 11.6,
+          z: -6.0,
+          rx: 1.2,
+          rz: 1.2,
+          height: 1.5,
+          buildGeometry(g) {
+            const nap = new THREE.Mesh(
+              new THREE.BoxGeometry(2.1, 1.3, 2.1),
+              new THREE.MeshStandardMaterial({ color: 0xfef08a, roughness: 0.75 })
+            );
+            nap.position.y = 0.65;
+            g.add(nap);
+          }
+        });
+      }
+
+      buildAllSemanticProps();
+
+      // =========================================================================
+      // 8. BUILD HYBRID PLAYER AVATARS (SOLDIER MESH + RC COMBAT CAR MESH)
+      // =========================================================================
+      function createHybridPlayerRig(primaryHex, accentHex) {
+        const root = new THREE.Group();
+
+        // --- A. MINIATURE TACTICAL SOLDIER SUB-GROUP ---
+        const soldierGroup = new THREE.Group();
+        // Legs
+        const legGeo = new THREE.BoxGeometry(0.28, 0.65, 0.28);
+        const legMat = new THREE.MeshStandardMaterial({ color: 0x1e293b });
+        const leftLeg = new THREE.Mesh(legGeo, legMat);
+        leftLeg.position.set(-0.2, 0.32, 0);
+        const rightLeg = new THREE.Mesh(legGeo, legMat);
+        rightLeg.position.set(0.2, 0.32, 0);
+        // Armored Torso
+        const torso = new THREE.Mesh(
+          new THREE.BoxGeometry(0.75, 0.85, 0.48),
+          new THREE.MeshStandardMaterial({ color: primaryHex, metalness: 0.35, roughness: 0.35 })
+        );
+        torso.position.y = 1.05;
+        torso.castShadow = true;
+        // Helmet + Glowing Visor
+        const helmet = new THREE.Mesh(
+          new THREE.SphereGeometry(0.36, 16, 16),
+          new THREE.MeshStandardMaterial({ color: primaryHex, metalness: 0.4, roughness: 0.3 })
+        );
+        helmet.position.y = 1.72;
+        const visor = new THREE.Mesh(
+          new THREE.BoxGeometry(0.42, 0.16, 0.25),
+          new THREE.MeshBasicMaterial({ color: accentHex })
+        );
+        visor.position.set(0.18, 1.72, 0);
+        // Pulse Rifle
+        const rifle = new THREE.Mesh(
+          new THREE.BoxGeometry(0.95, 0.18, 0.16),
+          new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.7 })
+        );
+        rifle.position.set(0.45, 1.12, 0.28);
+        const muzzleGlow = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.06, 0.06, 0.2, 8),
+          new THREE.MeshBasicMaterial({ color: accentHex })
+        );
+        muzzleGlow.rotation.z = Math.PI / 2;
+        muzzleGlow.position.set(0.95, 1.12, 0.28);
+
+        soldierGroup.add(leftLeg, rightLeg, torso, helmet, visor, rifle, muzzleGlow);
+        root.add(soldierGroup);
+
+        // --- B. MINIATURE RC COMBAT CAR SUB-GROUP ---
+        const carGroup = new THREE.Group();
+        carGroup.visible = false;
+
+        // Buggy Chassis
+        const chassis = new THREE.Mesh(
+          new THREE.BoxGeometry(1.75, 0.42, 1.15),
+          new THREE.MeshStandardMaterial({ color: primaryHex, metalness: 0.5, roughness: 0.25 })
+        );
+        chassis.position.y = 0.42;
+        chassis.castShadow = true;
+
+        // Cockpit Canopy
+        const canopy = new THREE.Mesh(
+          new THREE.BoxGeometry(0.85, 0.35, 0.85),
+          new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.8, roughness: 0.1 })
+        );
+        canopy.position.set(-0.1, 0.75, 0);
+
+        // Rear Spoiler Wing
+        const wing = new THREE.Mesh(
+          new THREE.BoxGeometry(0.32, 0.12, 1.25),
+          new THREE.MeshBasicMaterial({ color: accentHex })
+        );
+        wing.position.set(-0.82, 0.88, 0);
+
+        // Roof Micro-Turret
+        const turret = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.08, 0.08, 0.85, 10),
+          new THREE.MeshBasicMaterial({ color: accentHex })
+        );
+        turret.rotation.z = Math.PI / 2;
+        turret.position.set(0.45, 0.98, 0);
+
+        // 4 Off-Road Wheels
+        const wheelGeo = new THREE.CylinderGeometry(0.32, 0.32, 0.26, 16);
+        const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.8 });
+        const wheelPositions = [
+          [0.62, 0.32, 0.65],
+          [0.62, 0.32, -0.65],
+          [-0.62, 0.32, 0.65],
+          [-0.62, 0.32, -0.65]
+        ];
+        wheelPositions.forEach(([wx, wy, wz]) => {
+          const w = new THREE.Mesh(wheelGeo, wheelMat);
+          w.rotation.x = Math.PI / 2;
+          w.position.set(wx, wy, wz);
+          carGroup.add(w);
+        });
+
+        carGroup.add(chassis, canopy, wing, turret);
+        root.add(carGroup);
+
+        // Base Selection Ring
+        const ring = new THREE.Mesh(
+          new THREE.RingGeometry(0.75, 0.92, 28),
+          new THREE.MeshBasicMaterial({ color: accentHex, side: THREE.DoubleSide })
+        );
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.y = 0.04;
+        root.add(ring);
+
+        scene.add(root);
+        return { root, soldierGroup, carGroup, ring };
+      }
+
+      const rigP1 = createHybridPlayerRig(0x0284c7, 0x38bdf8); // Cyan/Blue India Soldier & RC Car
+      const rigP2 = createHybridPlayerRig(0xd97706, 0xfbbf24); // Amber/Orange US Soldier & RC Car
+
+      function syncRigToPlayerState(rig, state) {
+        rig.root.position.set(state.x, state.y, state.z);
+        rig.root.rotation.y = -state.yaw;
+        const isCar = state.mode === 'RC_CAR';
+        rig.soldierGroup.visible = !isCar;
+        rig.carGroup.visible = isCar;
+        if (!isCar) {
+          rig.soldierGroup.scale.y = state.crouching ? 0.58 : 1.0;
+        }
+      }
+
+      // =========================================================================
+      // 9. PROJECTILES, GRENADES & DEBRIS PARTICLE SYSTEM
+      // =========================================================================
+      const PROJECTILES = [];
+      const PARTICLES = [];
+
+      function spawnParticles(x, y, z, colorHex, count, speedScale) {
+        for (let i = 0; i < count; i++) {
+          const mesh = new THREE.Mesh(
+            new THREE.BoxGeometry(0.18, 0.18, 0.18),
+            new THREE.MeshBasicMaterial({ color: colorHex })
+          );
+          mesh.position.set(x, y, z);
+          scene.add(mesh);
+          const angle = Math.random() * Math.PI * 2;
+          const spd = (0.8 + Math.random() * 2.5) * (speedScale || 1);
+          PARTICLES.push({
+            mesh,
+            vx: Math.cos(angle) * spd,
+            vy: 1.5 + Math.random() * 3.2,
+            vz: Math.sin(angle) * spd,
+            life: 0.45 + Math.random() * 0.35
+          });
+        }
+      }
+
+      function spawnProjectile(ownerId, x, y, z, yaw, isGrenade, isCarShot) {
+        const color = ownerId === 'P1' ? 0x38bdf8 : 0xfbbf24;
+        const geo = isGrenade
+          ? new THREE.SphereGeometry(0.24, 12, 12)
+          : new THREE.SphereGeometry(0.14, 8, 8);
+        const mat = new THREE.MeshBasicMaterial({ color: isGrenade ? 0xf97316 : color });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(x, y, z);
+        scene.add(mesh);
+
+        const speed = isGrenade ? 15.0 : (isCarShot ? 32.0 : 28.0);
+        PROJECTILES.push({
+          ownerId,
+          mesh,
+          x,
+          y,
+          z,
+          vx: Math.cos(yaw) * speed,
+          vy: isGrenade ? 6.8 : 0,
+          vz: Math.sin(yaw) * speed,
+          isGrenade: !!isGrenade,
+          damage: isGrenade ? 65 : (isCarShot ? 18 : 22),
+          ttl: isGrenade ? 2.2 : 1.35
+        });
+
+        SoundFX.playPew(isCarShot);
+      }
+
+      // =========================================================================
+      // 10. COLLISION & COVER PROTECTION ENGINE
+      // =========================================================================
+      function isInsidePlatformWalkable(x, z) {
+        // India Desk: x in [-18.5, -3.0], z in [-9.4, 9.4]
+        if (x >= -18.5 && x <= -2.8 && z >= -9.4 && z <= 9.4) return true;
+        // Portal Bridge ("The Stitch"): x in [-3.2, 3.2], z in [-2.9, 2.9]
+        if (x >= -3.2 && x <= 3.2 && z >= -2.9 && z <= 2.9) return true;
+        // US Dining Table: x in [2.8, 18.5], z in [-9.4, 9.4]
+        if (x >= 2.8 && x <= 18.5 && z >= -9.4 && z <= 9.4) return true;
+        return false;
+      }
+
+      function resolvePropCollision(px, pz, radius) {
+        let outX = px;
+        let outZ = pz;
+        for (let i = 0; i < PROPS.length; i++) {
+          const p = PROPS[i];
+          if (p.destroyed) continue;
+          const minX = p.x - p.rx - radius;
+          const maxX = p.x + p.rx + radius;
+          const minZ = p.z - p.rz - radius;
+          const maxZ = p.z + p.rz + radius;
+          if (outX > minX && outX < maxX && outZ > minZ && outZ < maxZ) {
+            const penLeft = outX - minX;
+            const penRight = maxX - outX;
+            const penTop = outZ - minZ;
+            const penBottom = maxZ - outZ;
+            const minPen = Math.min(penLeft, penRight, penTop, penBottom);
+            if (minPen === penLeft) outX = minX;
+            else if (minPen === penRight) outX = maxX;
+            else if (minPen === penTop) outZ = minZ;
+            else outZ = maxZ;
+          }
+        }
+        return { x: outX, z: outZ };
+      }
+
+      function evaluatePlayerCoverStatus(player) {
+        for (let i = 0; i < PROPS.length; i++) {
+          const p = PROPS[i];
+          if (p.destroyed) continue;
+          const dx = Math.abs(player.x - p.x) - p.rx;
+          const dz = Math.abs(player.z - p.z) - p.rz;
+          const dist = Math.max(dx, dz);
+          if (dist < 1.35) {
+            return p.hardCover
+              ? `HARD COVER (${p.name})`
+              : `DESTRUCTIBLE (${p.name})`;
+          }
+        }
+        return 'EXPOSED';
+      }
+
+      function damageProp(prop, dmg, hitX, hitY, hitZ, broadcastOverRtc) {
+        if (prop.destroyed) return;
+        if (prop.hardCover) {
+          // Ceramic or Metal Hard Cover: 0 damage, bright cyan ricochet sparks!
+          spawnParticles(hitX, hitY, hitZ, 0x38bdf8, 8, 1.3);
+          SoundFX.playRicochet();
+          return;
+        }
+        prop.hp = Math.max(0, prop.hp - dmg);
+        spawnParticles(hitX, hitY, hitZ, 0xfbbf24, 10, 1.2);
+
+        if (prop.hp <= 0) {
+          prop.destroyed = true;
+          prop.group.visible = false;
+          spawnParticles(prop.x, 1.5, prop.z, 0xf59e0b, 26, 1.8);
+          SoundFX.playCardboardHit(true);
+          addCombatLog(`[DESTROYED] ${prop.name} (${prop.material}) shredded! Cover lost!`, 'text-amber-300');
+        } else {
+          // Visual dent/deformation on cardboard cover
+          const ratio = 0.45 + 0.55 * (prop.hp / prop.maxHp);
+          prop.group.scale.y = ratio;
+          prop.group.rotation.z = (Math.random() - 0.5) * 0.14;
+          SoundFX.playCardboardHit(false);
+        }
+        updatePropLabel(prop);
+        updateTelemetryMeshes();
+
+        if (broadcastOverRtc) {
+          sendRtcMessage({
+            type: 'PROP_DAMAGE',
+            propId: prop.id,
+            hp: prop.hp,
+            destroyed: prop.destroyed
+          });
+        }
+      }
+
+      function resetAllCoverProps() {
+        PROPS.forEach((p) => {
+          p.hp = p.maxHp;
+          p.destroyed = false;
+          p.group.visible = true;
+          p.group.scale.set(1, 1, 1);
+          p.group.rotation.set(0, 0, 0);
+          updatePropLabel(p);
+        });
+        updateTelemetryMeshes();
+        addCombatLog('[ARGON] Restored all destructible cardboard & plastic meshes.', 'text-emerald-300');
+      }
+
+      function updateTelemetryMeshes() {
+        const intact = PROPS.filter((p) => !p.destroyed).length;
+        const el = document.getElementById('telemetry-meshes');
+        if (el) el.textContent = `${intact} / ${PROPS.length} Props`;
+      }
+      updateTelemetryMeshes();
+
+      // =========================================================================
+      // 11. LIVE TWO-CLIENT WEBRTC MULTIPLAYER ENGINE (RTCPeerConnection + BroadcastChannel)
+      // =========================================================================
+      let peerConnection = null;
+      let dataChannel = null;
+      let sigChannel = null;
+      const clientInstanceId = 'client_' + Math.random().toString(36).slice(2, 9);
+
+      const rtcConfig = {
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      };
+
+      function updateRtcStatusUI(label, connected) {
+        GAME_STATE.rtcConnected = connected;
+        const shortEl = document.getElementById('rtc-status-short');
+        const stateEl = document.getElementById('modal-rtc-state');
+        const dotEl = document.getElementById('rtc-dot');
+        const driverEl = document.getElementById('remote-driver-label');
+        if (shortEl) shortEl.textContent = connected ? 'WebRTC: LIVE P2P' : label;
+        if (stateEl) stateEl.textContent = label;
+        if (dotEl) {
+          dotEl.className = connected
+            ? 'h-2 w-2 rounded-full bg-emerald-400 animate-ping'
+            : 'h-2 w-2 rounded-full bg-cyan-400 animate-pulse';
+        }
+        if (driverEl) {
+          driverEl.textContent = connected
+            ? 'LIVE WEBRTC PEER CONNECTED'
+            : (GAME_STATE.aiEnabled ? 'AI SPARRING BOT (AUTO)' : 'WAITING FOR PEER');
+        }
+      }
+
+      function setupDataChannel(dc) {
+        dataChannel = dc;
+        dataChannel.onopen = () => {
+          updateRtcStatusUI('CONNECTED (RTCDataChannel Open)', true);
+          addCombatLog('[WEBRTC] Live P2P DataChannel established with remote Realm!', 'text-emerald-300');
+        };
+        dataChannel.onclose = () => {
+          updateRtcStatusUI('DISCONNECTED (AI Fallback Active)', false);
+        };
+        dataChannel.onmessage = (evt) => {
+          try {
+            const msg = JSON.parse(evt.data);
+            handleIncomingNetworkPacket(msg);
+          } catch (e) {}
+        };
+      }
+
+      function createPeerConnection() {
+        if (peerConnection) {
+          try { peerConnection.close(); } catch (e) {}
+        }
+        peerConnection = new RTCPeerConnection(rtcConfig);
+        peerConnection.ondatachannel = (event) => {
+          setupDataChannel(event.channel);
+        };
+        peerConnection.onicecandidate = (event) => {
+          if (event.candidate && sigChannel) {
+            sigChannel.postMessage({
+              sender: clientInstanceId,
+              type: 'ICE_CANDIDATE',
+              candidate: event.candidate.toJSON()
+            });
+          }
+        };
+        peerConnection.onconnectionstatechange = () => {
+          if (!peerConnection) return;
+          const st = peerConnection.connectionState;
+          if (st === 'connected') {
+            updateRtcStatusUI('CONNECTED (WebRTC P2P)', true);
+          } else if (st === 'disconnected' || st === 'failed') {
+            updateRtcStatusUI('P2P READY (Listening)', false);
+          }
+        };
+        return peerConnection;
+      }
+
+      function sendRtcMessage(payload) {
+        payload.sender = clientInstanceId;
+        const raw = JSON.stringify(payload);
+        let sent = false;
+        if (dataChannel && dataChannel.readyState === 'open') {
+          try {
+            dataChannel.send(raw);
+            sent = true;
+          } catch (e) {}
+        }
+        // Also mirror over BroadcastChannel for instant zero-latency multi-tab sync during ICE negotiation
+        if (sigChannel) {
+          try {
+            sigChannel.postMessage({ sender: clientInstanceId, type: 'GAME_PACKET', payload });
+            sent = true;
+          } catch (e) {}
+        }
+        if (sent) {
+          GAME_STATE.packetsTx++;
+          const pktEl = document.getElementById('modal-rtc-packets');
+          if (pktEl) pktEl.textContent = `${GAME_STATE.packetsTx} / ${GAME_STATE.packetsRx}`;
+        }
+      }
+
+      function handleIncomingNetworkPacket(msg) {
+        if (!msg || msg.sender === clientInstanceId) return;
+        GAME_STATE.packetsRx++;
+        GAME_STATE.lastRemotePacketTime = performance.now();
+        const pktEl = document.getElementById('modal-rtc-packets');
+        if (pktEl) pktEl.textContent = `${GAME_STATE.packetsTx} / ${GAME_STATE.packetsRx}`;
+
+        const remotePlayer = getRemotePlayerObj();
+        if (msg.type === 'STATE_SYNC') {
+          remotePlayer.x = msg.x;
+          remotePlayer.z = msg.z;
+          remotePlayer.yaw = msg.yaw;
+          remotePlayer.mode = msg.mode;
+          remotePlayer.crouching = msg.crouching;
+          remotePlayer.hp = msg.hp;
+          const modePill = document.getElementById('remote-mode-pill');
+          if (modePill) modePill.textContent = msg.mode === 'RC_CAR' ? 'RC CAR' : 'SOLDIER';
+        } else if (msg.type === 'FIRE_EVENT') {
+          spawnProjectile('REMOTE', msg.x, msg.y, msg.z, msg.yaw, msg.isGrenade, msg.isCarShot);
+        } else if (msg.type === 'PROP_DAMAGE') {
+          const prop = PROPS.find((p) => p.id === msg.propId);
+          if (prop) {
+            prop.hp = msg.hp;
+            prop.destroyed = msg.destroyed;
+            prop.group.visible = !msg.destroyed;
+            updatePropLabel(prop);
+            updateTelemetryMeshes();
+          }
+        } else if (msg.type === 'PING') {
+          sendRtcMessage({ type: 'PONG', t0: msg.t0 });
+          addCombatLog('[WEBRTC] Received test ping from remote peer!', 'text-cyan-300');
+        } else if (msg.type === 'PONG') {
+          const rtt = Math.max(1, Math.round(performance.now() - msg.t0));
+          const rttEl = document.getElementById('telemetry-rtt');
+          if (rttEl) rttEl.textContent = `${rtt} ms (Live P2P)`;
+          addCombatLog(`[WEBRTC] P2P Round-Trip Time verified: ${rtt} ms`, 'text-emerald-300');
+        }
+      }
+
+      // Initialize BroadcastChannel for automatic two-tab WebRTC signaling
+      try {
+        if (typeof BroadcastChannel !== 'undefined') {
+          sigChannel = new BroadcastChannel('realm_stitchers_webrtc_v1');
+          sigChannel.onmessage = async (event) => {
+            const data = event.data;
+            if (!data || data.sender === clientInstanceId) return;
+
+            if (data.type === 'GAME_PACKET') {
+              if (!GAME_STATE.rtcConnected) {
+                updateRtcStatusUI('LIVE MULTI-TAB SYNC', true);
+              }
+              handleIncomingNetworkPacket(data.payload);
+              return;
+            }
+
+            try {
+              if (data.type === 'SDP_OFFER') {
+                // If another tab claims INDIA, automatically switch this tab to US Table so each tab controls one realm!
+                if (data.role === 'INDIA' && GAME_STATE.localRole === 'INDIA') {
+                  switchPlayerRole('US', false);
+                }
+                const pc = createPeerConnection();
+                await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                sigChannel.postMessage({
+                  sender: clientInstanceId,
+                  type: 'SDP_ANSWER',
+                  sdp: pc.localDescription
+                });
+              } else if (data.type === 'SDP_ANSWER' && peerConnection) {
+                if (peerConnection.signalingState === 'have-local-offer') {
+                  await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
+                }
+              } else if (data.type === 'ICE_CANDIDATE' && peerConnection) {
+                await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+              }
+            } catch (err) {}
+          };
+        }
+      } catch (e) {}
+
+      async function initiateAutoWebRtcHandshake() {
+        try {
+          const pc = createPeerConnection();
+          const dc = pc.createDataChannel('realm_stitchers_state', { ordered: false, maxRetransmits: 0 });
+          setupDataChannel(dc);
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          if (sigChannel) {
+            sigChannel.postMessage({
+              sender: clientInstanceId,
+              type: 'SDP_OFFER',
+              role: GAME_STATE.localRole,
+              sdp: pc.localDescription
+            });
+          }
+          const fb = document.getElementById('sdp-feedback');
+          if (fb) fb.textContent = 'Broadcasted WebRTC Offer! Any second tab open in this browser will auto-pair.';
+        } catch (e) {}
+      }
+
+      // Auto-broadcast offer on load so opening a second tab pairs automatically
+      setTimeout(initiateAutoWebRtcHandshake, 400);
+
+      // Manual Base64 SDP Offer / Answer Generator for Cross-Device WebRTC
+      async function generateManualSdpOffer() {
+        const sdpArea = document.getElementById('sdp-textarea');
+        const fb = document.getElementById('sdp-feedback');
+        try {
+          const pc = createPeerConnection();
+          const dc = pc.createDataChannel('realm_stitchers_manual');
+          setupDataChannel(dc);
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          await new Promise((r) => setTimeout(r, 350));
+          const token = btoa(JSON.stringify(pc.localDescription));
+          if (sdpArea) sdpArea.value = token;
+          if (fb) fb.textContent = 'Generated Base64 WebRTC SDP Offer! Copy & send to Client 2.';
+        } catch (err) {
+          if (fb) fb.textContent = 'WebRTC Offer status: ' + err.message;
+        }
+      }
+
+      async function acceptManualSdpToken() {
+        const sdpArea = document.getElementById('sdp-textarea');
+        const fb = document.getElementById('sdp-feedback');
+        if (!sdpArea || !sdpArea.value.trim()) {
+          if (fb) fb.textContent = 'Paste a valid Base64 SDP Offer or Answer token into the box first.';
+          return;
+        }
+        try {
+          const desc = JSON.parse(atob(sdpArea.value.trim()));
+          if (desc.type === 'offer') {
+            const pc = createPeerConnection();
+            await pc.setRemoteDescription(new RTCSessionDescription(desc));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            await new Promise((r) => setTimeout(r, 350));
+            sdpArea.value = btoa(JSON.stringify(pc.localDescription));
+            if (fb) fb.textContent = 'Created SDP Answer! Copy this token back to the Host tab.';
+          } else if (desc.type === 'answer' && peerConnection) {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(desc));
+            if (fb) fb.textContent = 'Applied Remote SDP Answer! WebRTC P2P Handshake complete.';
+          }
+        } catch (err) {
+          if (fb) fb.textContent = 'Invalid SDP token format. Make sure you copied the full string.';
+        }
+      }
+
+      // =========================================================================
+      // 12. PLAYER ROLE SWITCHING, HYBRID MORPHING & CONTROLS
+      // =========================================================================
+      function getLocalPlayerObj() {
+        return GAME_STATE.localRole === 'INDIA' ? PLAYER_1 : PLAYER_2;
+      }
+      function getRemotePlayerObj() {
+        return GAME_STATE.localRole === 'INDIA' ? PLAYER_2 : PLAYER_1;
+      }
+
+      function switchPlayerRole(newRole, announce) {
+        GAME_STATE.localRole = newRole;
+        const btnIndia = document.getElementById('btn-role-india');
+        const btnUs = document.getElementById('btn-role-us');
+        const localTitle = document.getElementById('local-player-title');
+        const remoteTitle = document.getElementById('remote-player-title');
+
+        if (newRole === 'INDIA') {
+          if (btnIndia) btnIndia.className = 'flex-1 rounded-lg bg-cyan-600 px-3 py-2 font-bold text-white border border-cyan-300/50 transition';
+          if (btnUs) btnUs.className = 'flex-1 rounded-lg bg-slate-800 hover:bg-slate-700 px-3 py-2 font-bold text-amber-300 border border-amber-500/30 transition';
+          if (localTitle) localTitle.textContent = 'YOU • INDIA DESK (P1)';
+          if (remoteTitle) remoteTitle.textContent = 'OPPONENT • US TABLE (P2)';
+        } else {
+          if (btnUs) btnUs.className = 'flex-1 rounded-lg bg-amber-600 px-3 py-2 font-bold text-white border border-amber-300/50 transition';
+          if (btnIndia) btnIndia.className = 'flex-1 rounded-lg bg-slate-800 hover:bg-slate-700 px-3 py-2 font-bold text-cyan-300 border border-cyan-500/30 transition';
+          if (localTitle) localTitle.textContent = 'YOU • US TABLE (P2)';
+          if (remoteTitle) remoteTitle.textContent = 'OPPONENT • INDIA DESK (P1)';
+        }
+        if (announce !== false) {
+          addCombatLog(`[ROLE] Switched local control to ${newRole === 'INDIA' ? 'India Desk (P1)' : 'US Dining Table (P2)'}.`, 'text-cyan-300');
+        }
+      }
+
+      function toggleHybridMode() {
+        const localP = getLocalPlayerObj();
+        GAME_STATE.mode = GAME_STATE.mode === 'SOLDIER' ? 'RC_CAR' : 'SOLDIER';
+        localP.mode = GAME_STATE.mode;
+        localP.crouching = false;
+
+        const iconEl = document.getElementById('mode-icon');
+        const labelEl = document.getElementById('mode-label');
+        const crouchTitle = document.getElementById('crouch-btn-title');
+        if (GAME_STATE.mode === 'RC_CAR') {
+          if (iconEl) iconEl.textContent = '🏎️';
+          if (labelEl) labelEl.textContent = 'MODE: RC COMBAT CAR';
+          if (crouchTitle) crouchTitle.textContent = '🛞 DRIFT BRAKE';
+          addCombatLog('[HYBRID] Deployed Miniature RC Combat Car! Use Shift for Nitro across the Portal Bridge!', 'text-purple-300');
+        } else {
+          if (iconEl) iconEl.textContent = '🪖';
+          if (labelEl) labelEl.textContent = 'MODE: TACTICAL SOLDIER';
+          if (crouchTitle) crouchTitle.textContent = '🛡️ TAKE COVER';
+          addCombatLog('[HYBRID] Morphed to Miniature Tactical Soldier! Press [C] to crouch behind cover.', 'text-cyan-300');
+        }
+        spawnParticles(localP.x, 1.0, localP.z, 0xc084fc, 16, 1.5);
+        SoundFX.playMorph();
+      }
+
+      function toggleSemanticVision() {
+        GAME_STATE.semanticVision = !GAME_STATE.semanticVision;
+        const btnText = document.getElementById('semantic-btn-text');
+        if (btnText) {
+          btnText.textContent = GAME_STATE.semanticVision ? 'Argon Vision: ON' : 'Argon Vision: OFF';
+        }
+        PROPS.forEach((p) => {
+          p.wireBox.visible = GAME_STATE.semanticVision && !p.destroyed;
+          updatePropLabel(p);
+        });
+      }
+
+      function triggerDualScanSequence() {
+        if (GAME_STATE.scanning) return;
+        GAME_STATE.scanning = true;
+        document.body.classList.add('scanning-active');
+        const banner = document.getElementById('scan-banner');
+        const titleEl = document.getElementById('scan-stage-title');
+        const descEl = document.getElementById('scan-stage-desc');
+        const pctEl = document.getElementById('scan-pct');
+        const barEl = document.getElementById('scan-progress-bar');
+        if (banner) banner.classList.remove('hidden');
+
+        SoundFX.playPortalCross();
+        resetAllCoverProps();
+
+        const stages = [
+          {
+            pct: '25%',
+            title: 'STAGE 1/4: DUAL SMARTPHONE CAMERA PAN (INDIA & US)',
+            desc: 'Ingesting 60fps RGB-D frames from Bengaluru Desk & Austin Dining Table via HAProxy...'
+          },
+          {
+            pct: '55%',
+            title: 'STAGE 2/4: GEMINI 4 ARGON REAL2SIM SEMANTIC SEGMENTATION',
+            desc: 'Classifying Coffee Mug & Fruit Bowl as CERAMIC (Hard Cover) and Cereal Box as CARDBOARD (Destructible)...'
+          },
+          {
+            pct: '85%',
+            title: 'STAGE 3/4: SE(3) BOUNDARY ALIGNMENT & PORTAL BRIDGE SPAWN',
+            desc: 'Computing cliff-edge normals and stitching India Desk edge (x=-3) to US Table edge (x=+3)...'
+          },
+          {
+            pct: '100%',
+            title: 'STAGE 4/4: CROSS-REALITY BATTLEGROUND LIVE!',
+            desc: 'WebRTC DataChannels & collision meshes synchronized.'
+          }
+        ];
+
+        stages.forEach((st, idx) => {
+          setTimeout(() => {
+            if (titleEl) titleEl.textContent = st.title;
+            if (descEl) descEl.textContent = st.desc;
+            if (pctEl) pctEl.textContent = st.pct;
+            if (barEl) barEl.style.width = st.pct;
+          }, idx * 700);
+        });
+
+        setTimeout(() => {
+          document.body.classList.remove('scanning-active');
+          if (banner) banner.classList.add('hidden');
+          GAME_STATE.scanning = false;
+        }, 3000);
+      }
+
+      function fireLocalWeapon(isGrenade) {
+        const now = performance.now();
+        const localP = getLocalPlayerObj();
+        if (isGrenade) {
+          if (GAME_STATE.grenadeCooldown > 0) return;
+          GAME_STATE.grenadeCooldown = 3.5;
+          spawnProjectile(localP.id, localP.x + Math.cos(localP.yaw) * 0.9, 1.3, localP.z + Math.sin(localP.yaw) * 0.9, localP.yaw, true, false);
+          sendRtcMessage({
+            type: 'FIRE_EVENT',
+            x: localP.x + Math.cos(localP.yaw) * 0.9,
+            y: 1.3,
+            z: localP.z + Math.sin(localP.yaw) * 0.9,
+            yaw: localP.yaw,
+            isGrenade: true,
+            isCarShot: false
+          });
+          return;
+        }
+
+        const fireInterval = localP.mode === 'RC_CAR' ? 160 : 190;
+        if (now - GAME_STATE.lastFireTime < fireInterval) return;
+        GAME_STATE.lastFireTime = now;
+
+        const isCar = localP.mode === 'RC_CAR';
+        const sx = localP.x + Math.cos(localP.yaw) * 1.05;
+        const sy = isCar ? 0.95 : (localP.crouching ? 0.72 : 1.15);
+        const sz = localP.z + Math.sin(localP.yaw) * 1.05;
+
+        spawnProjectile(localP.id, sx, sy, sz, localP.yaw, false, isCar);
+        sendRtcMessage({
+          type: 'FIRE_EVENT',
+          x: sx,
+          y: sy,
+          z: sz,
+          yaw: localP.yaw,
+          isGrenade: false,
+          isCarShot: isCar
+        });
+      }
+
+      // =========================================================================
+      // 13. MOUSE RAYCAST AIMING, KEYBOARD & TOUCH LISTENERS
+      // =========================================================================
+      const raycaster = new THREE.Raycaster();
+      const mouseNdc = new THREE.Vector2();
+      const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -1.0);
+      const aimIntersectPt = new THREE.Vector3();
+
+      container.addEventListener('pointermove', (e) => {
+        const rect = container.getBoundingClientRect();
+        mouseNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        mouseNdc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        raycaster.setFromCamera(mouseNdc, camera);
+        if (raycaster.ray.intersectPlane(groundPlane, aimIntersectPt)) {
+          INPUT.aimWorldX = aimIntersectPt.x;
+          INPUT.aimWorldZ = aimIntersectPt.z;
+          const localP = getLocalPlayerObj();
+          localP.yaw = Math.atan2(INPUT.aimWorldZ - localP.z, INPUT.aimWorldX - localP.x);
+        }
+      });
+
+      container.addEventListener('pointerdown', (e) => {
+        SoundFX.init();
+        if (e.button === 2) {
+          fireLocalWeapon(true);
+        } else {
+          INPUT.firing = true;
+          fireLocalWeapon(false);
+        }
+      });
+
+      window.addEventListener('pointerup', () => {
+        INPUT.firing = false;
+      });
+
+      container.addEventListener('contextmenu', (e) => e.preventDefault());
+
+      window.addEventListener('keydown', (e) => {
+        if (e.target && (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT')) return;
+        const code = e.code;
+        if (code === 'KeyW' || code === 'ArrowUp') INPUT.w = true;
+        if (code === 'KeyS' || code === 'ArrowDown') INPUT.s = true;
+        if (code === 'KeyA' || code === 'ArrowLeft') INPUT.a = true;
+        if (code === 'KeyD' || code === 'ArrowRight') INPUT.d = true;
+        if (code === 'ShiftLeft' || code === 'ShiftRight') INPUT.shift = true;
+        if (code === 'KeyF' || code === 'Space') {
+          INPUT.firing = true;
+          fireLocalWeapon(false);
+        }
+        if (code === 'KeyG') fireLocalWeapon(true);
+        if (code === 'KeyV') toggleHybridMode();
+        if (code === 'KeyT') toggleSemanticVision();
+        if (code === 'KeyR') triggerDualScanSequence();
+        if (code === 'KeyK') cycleCameraView();
+        if (code === 'KeyC') {
+          const localP = getLocalPlayerObj();
+          localP.crouching = !localP.crouching;
+        }
+        if (code === 'Escape') {
+          document.getElementById('modal-webrtc').classList.add('hidden');
+          document.getElementById('modal-arch').classList.add('hidden');
+        }
+      });
+
+      window.addEventListener('keyup', (e) => {
+        const code = e.code;
+        if (code === 'KeyW' || code === 'ArrowUp') INPUT.w = false;
+        if (code === 'KeyS' || code === 'ArrowDown') INPUT.s = false;
+        if (code === 'KeyA' || code === 'ArrowLeft') INPUT.a = false;
+        if (code === 'KeyD' || code === 'ArrowRight') INPUT.d = false;
+        if (code === 'ShiftLeft' || code === 'ShiftRight') INPUT.shift = false;
+        if (code === 'KeyF' || code === 'Space') INPUT.firing = false;
+      });
+
+      // Bind On-Screen Pad & Action Buttons
+      function bindHoldButton(btnId, keyProp) {
+        const el = document.getElementById(btnId);
+        if (!el) return;
+        el.addEventListener('pointerdown', (e) => { e.preventDefault(); SoundFX.init(); INPUT[keyProp] = true; });
+        el.addEventListener('pointerup', () => { INPUT[keyProp] = false; });
+        el.addEventListener('pointerleave', () => { INPUT[keyProp] = false; });
+      }
+      bindHoldButton('pad-up', 'w');
+      bindHoldButton('pad-down', 's');
+      bindHoldButton('pad-left', 'a');
+      bindHoldButton('pad-right', 'd');
+      bindHoldButton('btn-action-boost', 'shift');
+
+      document.getElementById('btn-action-fire').addEventListener('click', () => fireLocalWeapon(false));
+      document.getElementById('btn-action-grenade').addEventListener('click', () => fireLocalWeapon(true));
+      document.getElementById('btn-action-crouch').addEventListener('click', () => {
+        const localP = getLocalPlayerObj();
+        localP.crouching = !localP.crouching;
+      });
+
+      document.getElementById('btn-toggle-mode').addEventListener('click', toggleHybridMode);
+      document.getElementById('btn-toggle-semantic').addEventListener('click', toggleSemanticVision);
+      document.getElementById('btn-rescan-stitch').addEventListener('click', triggerDualScanSequence);
+      document.getElementById('btn-reset-cover').addEventListener('click', resetAllCoverProps);
+
+      function cycleCameraView() {
+        GAME_STATE.cameraViewIndex = (GAME_STATE.cameraViewIndex + 1) % 3;
+        const names = ['Cam: Chase', 'Cam: Overhead', 'Cam: Bridge'];
+        const lbl = document.getElementById('camera-view-label');
+        if (lbl) lbl.textContent = names[GAME_STATE.cameraViewIndex];
+      }
+      document.getElementById('btn-camera-view').addEventListener('click', cycleCameraView);
+
+      document.getElementById('btn-toggle-audio').addEventListener('click', () => {
+        SoundFX.muted = !SoundFX.muted;
+        document.getElementById('audio-icon').textContent = SoundFX.muted ? '🔇' : '🔊';
+      });
+
+      // WebRTC Modal Controls
+      document.getElementById('btn-open-webrtc').addEventListener('click', () => {
+        document.getElementById('modal-webrtc').classList.remove('hidden');
+      });
+      document.getElementById('btn-close-webrtc').addEventListener('click', () => {
+        document.getElementById('modal-webrtc').classList.add('hidden');
+      });
+      document.getElementById('btn-role-india').addEventListener('click', () => switchPlayerRole('INDIA', true));
+      document.getElementById('btn-role-us').addEventListener('click', () => switchPlayerRole('US', true));
+      document.getElementById('btn-rtc-autoconnect').addEventListener('click', initiateAutoWebRtcHandshake);
+      document.getElementById('btn-rtc-ping').addEventListener('click', () => {
+        sendRtcMessage({ type: 'PING', t0: performance.now() });
+        addCombatLog('[WEBRTC] Sent test ping packet over RTCDataChannel...', 'text-cyan-300');
+      });
+      document.getElementById('btn-create-offer').addEventListener('click', generateManualSdpOffer);
+      document.getElementById('btn-accept-offer').addEventListener('click', acceptManualSdpToken);
+      document.getElementById('btn-copy-sdp').addEventListener('click', () => {
+        const sdpArea = document.getElementById('sdp-textarea');
+        if (!sdpArea) return;
+        sdpArea.select();
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(sdpArea.value);
+          } else {
+            document.execCommand('copy');
+          }
+          document.getElementById('sdp-feedback').textContent = 'Copied SDP Token to clipboard!';
+        } catch (e) {
+          document.execCommand('copy');
+        }
+      });
+
+      function toggleAiBot() {
+        GAME_STATE.aiEnabled = !GAME_STATE.aiEnabled;
+        const qBtn = document.getElementById('btn-quick-ai-toggle');
+        const mBtn = document.getElementById('btn-modal-ai-toggle');
+        if (qBtn) {
+          qBtn.textContent = GAME_STATE.aiEnabled ? 'ACTIVE (ON)' : 'PAUSED (OFF)';
+          qBtn.className = GAME_STATE.aiEnabled
+            ? 'rounded bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 px-2 py-0.5 font-mono-tech text-[10px] font-semibold text-emerald-300 transition'
+            : 'rounded bg-slate-800 hover:bg-slate-700 border border-slate-600 px-2 py-0.5 font-mono-tech text-[10px] font-semibold text-slate-400 transition';
+        }
+        if (mBtn) {
+          mBtn.textContent = GAME_STATE.aiEnabled ? 'ENABLED' : 'DISABLED';
+        }
+        updateRtcStatusUI(GAME_STATE.rtcConnected ? 'WebRTC: LIVE P2P' : 'WebRTC: P2P READY', GAME_STATE.rtcConnected);
+      }
+      document.getElementById('btn-quick-ai-toggle').addEventListener('click', toggleAiBot);
+      document.getElementById('btn-modal-ai-toggle').addEventListener('click', toggleAiBot);
+
+      // Architecture Modal & Code Tabs
+      const archArea = document.getElementById('arch-content-area');
+      let currentArchTab = 'blueprint';
+      function renderArchTab(tabKey) {
+        currentArchTab = tabKey;
+        if (archArea) {
+          archArea.textContent = ARCH_TABS[tabKey] || '';
+        }
+        document.querySelectorAll('.arch-tab-btn').forEach((btn) => {
+          const isAct = btn.getAttribute('data-arch-tab') === tabKey;
+          btn.className = isAct
+            ? 'arch-tab-btn rounded-lg bg-amber-500/20 border border-amber-400/50 px-3 py-1.5 text-xs font-bold text-amber-300'
+            : 'arch-tab-btn rounded-lg bg-slate-800/80 hover:bg-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300';
+        });
+      }
+      renderArchTab('blueprint');
+
+      document.querySelectorAll('.arch-tab-btn').forEach((btn) => {
+        btn.addEventListener('click', () => renderArchTab(btn.getAttribute('data-arch-tab')));
+      });
+      document.getElementById('btn-open-arch').addEventListener('click', () => {
+        document.getElementById('modal-arch').classList.remove('hidden');
+      });
+      document.getElementById('btn-close-arch').addEventListener('click', () => {
+        document.getElementById('modal-arch').classList.add('hidden');
+      });
+      document.getElementById('btn-copy-arch-code').addEventListener('click', () => {
+        const text = ARCH_TABS[currentArchTab] || '';
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text);
+          }
+          const btn = document.getElementById('btn-copy-arch-code');
+          btn.textContent = '✓ Copied!';
+          setTimeout(() => { btn.textContent = '📋 Copy Active Tab'; }, 1500);
+        } catch (e) {}
+      });
+
+      // =========================================================================
+      // 14. MAIN SIMULATION, AI BOT & RENDER LOOP
+      // =========================================================================
+      let lastFrameTime = performance.now();
+      let lastSyncSentTime = 0;
+
+      function updateLocalPlayerPhysics(dt) {
+        const p = getLocalPlayerObj();
+        p.mode = GAME_STATE.mode;
+
+        let moveX = 0;
+        let moveZ = 0;
+        if (INPUT.w) moveZ -= 1;
+        if (INPUT.s) moveZ += 1;
+        if (INPUT.a) moveX -= 1;
+        if (INPUT.d) moveX += 1;
+
+        const len = Math.hypot(moveX, moveZ);
+        if (len > 0) {
+          moveX /= len;
+          moveZ /= len;
+        }
+
+        const isBoosting = INPUT.shift && p.energy > 5;
+        if (isBoosting && len > 0) {
+          p.energy = Math.max(0, p.energy - 32 * dt);
+        } else {
+          p.energy = Math.min(100, p.energy + 18 * dt);
+        }
+
+        let baseSpeed = p.mode === 'RC_CAR' ? 9.8 : (p.crouching ? 4.2 : 6.8);
+        if (isBoosting) baseSpeed *= 1.55;
+        // Portal Bridge speed boost pad effect
+        if (Math.abs(p.x) < 3.1 && Math.abs(p.z) < 2.9 && p.mode === 'RC_CAR') {
+          baseSpeed *= 1.25;
+        }
+
+        const nextX = p.x + moveX * baseSpeed * dt;
+        const nextZ = p.z + moveZ * baseSpeed * dt;
+
+        // Keep player within stitched platforms (India Desk, Portal Bridge, US Table)
+        let candidateX = p.x;
+        let candidateZ = p.z;
+        if (isInsidePlatformWalkable(nextX, nextZ)) {
+          candidateX = nextX;
+          candidateZ = nextZ;
+        } else if (isInsidePlatformWalkable(nextX, p.z)) {
+          candidateX = nextX;
+        } else if (isInsidePlatformWalkable(p.x, nextZ)) {
+          candidateZ = nextZ;
+        }
+
+        const resolved = resolvePropCollision(candidateX, candidateZ, p.mode === 'RC_CAR' ? 0.85 : 0.55);
+        p.x = resolved.x;
+        p.z = resolved.z;
+
+        // If driving RC car and moving, align yaw smoothly or keep turret aimed at cursor
+        if (p.mode === 'RC_CAR' && len > 0.1 && !INPUT.firing) {
+          p.yaw = Math.atan2(moveZ, moveX);
+        }
+
+        // Detect Realm Transitions
+        const prevRealm = p.currentRealm;
+        if (p.x < -3.0) p.currentRealm = 'INDIA DESK';
+        else if (p.x > 3.0) p.currentRealm = 'US TABLE';
+        else p.currentRealm = 'PORTAL BRIDGE';
+
+        if (prevRealm !== p.currentRealm && p.currentRealm === 'PORTAL BRIDGE') {
+          SoundFX.playPortalCross();
+          addCombatLog('[PORTAL] Crossing The Stitch! Bridging India Desk ⇄ US Table.', 'text-purple-300');
+        }
+
+        p.coverState = evaluatePlayerCoverStatus(p);
+
+        if (INPUT.firing) {
+          fireLocalWeapon(false);
+        }
+      }
+
+      function updateAiOpponent(dt) {
+        // Only run AI if no live WebRTC packet arrived in the last 2.5 seconds and AI is enabled
+        const livePeerActive = (performance.now() - GAME_STATE.lastRemotePacketTime) < 2500;
+        if (livePeerActive || !GAME_STATE.aiEnabled) return;
+
+        const bot = getRemotePlayerObj();
+        const human = getLocalPlayerObj();
+
+        bot.aiTimer -= dt;
+        bot.aiMorphTimer -= dt;
+        if (bot.aiMorphTimer <= 0) {
+          bot.aiMorphTimer = 7 + Math.random() * 6;
+          bot.mode = bot.mode === 'SOLDIER' ? 'RC_CAR' : 'SOLDIER';
+          const modePill = document.getElementById('remote-mode-pill');
+          if (modePill) modePill.textContent = bot.mode === 'RC_CAR' ? 'RC CAR' : 'SOLDIER';
+        }
+
+        if (bot.aiTimer <= 0) {
+          bot.aiTimer = 1.6 + Math.random() * 1.5;
+          // Choose tactical waypoint: either behind US Fruit Bowl, behind Cereal Box, or flank across Portal Bridge!
+          const roll = Math.random();
+          if (roll < 0.38) {
+            // Take cover behind Fruit Bowl or Coffee Mug depending on side
+            bot.aiTargetX = GAME_STATE.localRole === 'INDIA' ? 9.5 : -9.5;
+            bot.aiTargetZ = -3.2 + (Math.random() - 0.5) * 2.0;
+            bot.crouching = bot.mode === 'SOLDIER';
+          } else if (roll < 0.72) {
+            // Take cover behind Cereal Box / Keyboard
+            bot.aiTargetX = GAME_STATE.localRole === 'INDIA' ? 9.2 : -9.2;
+            bot.aiTargetZ = 2.6 + (Math.random() - 0.5) * 2.0;
+            bot.crouching = false;
+          } else {
+            // Rush across the Portal Bridge to flank!
+            bot.aiTargetX = (Math.random() - 0.5) * 4.5;
+            bot.aiTargetZ = (Math.random() - 0.5) * 3.2;
+            bot.crouching = false;
+          }
+        }
+
+        const dx = bot.aiTargetX - bot.x;
+        const dz = bot.aiTargetZ - bot.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 0.35) {
+          const spd = bot.mode === 'RC_CAR' ? 7.2 : 4.8;
+          const nx = bot.x + (dx / dist) * spd * dt;
+          const nz = bot.z + (dz / dist) * spd * dt;
+          if (isInsidePlatformWalkable(nx, nz)) {
+            const res = resolvePropCollision(nx, nz, 0.65);
+            bot.x = res.x;
+            bot.z = res.z;
+          }
+        }
+
+        // Aim towards human player with slight tactical spread
+        bot.yaw = Math.atan2(human.z - bot.z, human.x - bot.x);
+
+        bot.aiFireTimer -= dt;
+        if (bot.aiFireTimer <= 0) {
+          bot.aiFireTimer = bot.mode === 'RC_CAR' ? 0.55 : 0.75;
+          const aimSpread = (Math.random() - 0.5) * 0.16;
+          spawnProjectile(
+            bot.id,
+            bot.x + Math.cos(bot.yaw) * 1.0,
+            bot.mode === 'RC_CAR' ? 0.95 : 1.1,
+            bot.z + Math.sin(bot.yaw) * 1.0,
+            bot.yaw + aimSpread,
+            false,
+            bot.mode === 'RC_CAR'
+          );
+        }
+      }
+
+      function updateProjectilesAndParticles(dt) {
+        const localP = getLocalPlayerObj();
+        const remoteP = getRemotePlayerObj();
+
+        for (let i = PROJECTILES.length - 1; i >= 0; i--) {
+          const pr = PROJECTILES[i];
+          pr.ttl -= dt;
+          pr.x += pr.vx * dt;
+          pr.y += pr.vy * dt;
+          pr.z += pr.vz * dt;
+          if (pr.isGrenade) {
+            pr.vy -= 15.5 * dt; // Gravity on grenade arc
+          }
+          pr.mesh.position.set(pr.x, pr.y, pr.z);
+
+          let remove = pr.ttl <= 0;
+
+          // Grenade ground detonation
+          if (pr.isGrenade && pr.y <= 0.25) {
+            remove = true;
+            spawnParticles(pr.x, 0.5, pr.z, 0xf97316, 28, 2.0);
+            SoundFX.playCardboardHit(true);
+            // Area damage to nearby destructible props
+            PROPS.forEach((prop) => {
+              if (!prop.destroyed && Math.hypot(prop.x - pr.x, prop.z - pr.z) < 3.6) {
+                damageProp(prop, 85, prop.x, 1.2, prop.z, true);
+              }
+            });
+            // Area damage to opponent
+            const target = pr.ownerId === localP.id ? remoteP : localP;
+            if (Math.hypot(target.x - pr.x, target.z - pr.z) < 3.2) {
+              applyPlayerDamage(target, 38);
+            }
+          }
+
+          // Check collision with Semantic 3D Props (Coffee Mug, Cereal Box, Fruit Bowl, etc.)
+          if (!remove) {
+            for (let j = 0; j < PROPS.length; j++) {
+              const prop = PROPS[j];
+              if (prop.destroyed) continue;
+              if (
+                pr.x > prop.x - prop.rx &&
+                pr.x < prop.x + prop.rx &&
+                pr.z > prop.z - prop.rz &&
+                pr.z < prop.z + prop.rz &&
+                pr.y <= prop.height
+              ) {
+                damageProp(prop, pr.damage, pr.x, pr.y, pr.z, pr.ownerId === localP.id);
+                remove = true;
+                break;
+              }
+            }
+          }
+
+          // Check collision with Players
+          if (!remove) {
+            const target = pr.ownerId === localP.id ? remoteP : localP;
+            const hitRadius = target.mode === 'RC_CAR' ? 0.95 : (target.crouching ? 0.52 : 0.72);
+            if (Math.hypot(pr.x - target.x, pr.z - target.z) < hitRadius && pr.y <= 2.0) {
+              // If target is crouching right behind Hard Cover relative to shooter, reduce damage!
+              let dmg = pr.damage;
+              if (target.crouching && target.coverState.startsWith('HARD COVER')) {
+                dmg = Math.round(dmg * 0.25);
+              }
+              applyPlayerDamage(target, dmg);
+              spawnParticles(pr.x, pr.y, pr.z, target.id === 'P1' ? 0x38bdf8 : 0xfbbf24, 9, 1.2);
+              remove = true;
+            }
+          }
+
+          if (remove) {
+            scene.remove(pr.mesh);
+            PROJECTILES.splice(i, 1);
+          }
+        }
+
+        // Update Debris & Spark Particles
+        for (let i = PARTICLES.length - 1; i >= 0; i--) {
+          const pt = PARTICLES[i];
+          pt.life -= dt;
+          pt.vy -= 9.8 * dt;
+          pt.mesh.position.x += pt.vx * dt;
+          pt.mesh.position.y = Math.max(0.08, pt.mesh.position.y + pt.vy * dt);
+          pt.mesh.position.z += pt.vz * dt;
+          pt.mesh.rotation.x += 6 * dt;
+          pt.mesh.rotation.y += 6 * dt;
+          if (pt.life <= 0) {
+            scene.remove(pt.mesh);
+            PARTICLES.splice(i, 1);
+          }
+        }
+      }
+
+      function applyPlayerDamage(target, amount) {
+        target.hp = Math.max(0, target.hp - amount);
+        if (target.hp <= 0) {
+          target.hp = 100;
+          spawnParticles(target.x, 1.2, target.z, 0xef4444, 24, 1.9);
+          if (target.id === 'P1') {
+            GAME_STATE.scoreP2++;
+            target.x = -12.0;
+            target.z = (Math.random() - 0.5) * 6;
+            addCombatLog('[RESPAWN] India Desk unit eliminated! Respawning at Bengaluru Desk.', 'text-amber-300');
+          } else {
+            GAME_STATE.scoreP1++;
+            target.x = 12.0;
+            target.z = (Math.random() - 0.5) * 6;
+            addCombatLog('[POINT SCORED] US Table opponent eliminated! +1 Score!', 'text-emerald-300');
+          }
+          document.getElementById('match-score').textContent =
+            GAME_STATE.localRole === 'INDIA'
+              ? `${GAME_STATE.scoreP1} — ${GAME_STATE.scoreP2}`
+              : `${GAME_STATE.scoreP2} — ${GAME_STATE.scoreP1}`;
+        }
+      }
+
+      function updateCameraAndLabels() {
+        const localP = getLocalPlayerObj();
+        if (GAME_STATE.cameraViewIndex === 0) {
+          // Smooth Isometric Tactical Chase Cam
+          const targetCamX = localP.x * 0.55;
+          const targetCamY = 14.5;
+          const targetCamZ = 16.5 + localP.z * 0.35;
+          camera.position.x += (targetCamX - camera.position.x) * 0.08;
+          camera.position.y += (targetCamY - camera.position.y) * 0.08;
+          camera.position.z += (targetCamZ - camera.position.z) * 0.08;
+          camera.lookAt(localP.x * 0.35, 0.8, localP.z * 0.25);
+        } else if (GAME_STATE.cameraViewIndex === 1) {
+          // Full Overhead Cross-Realm Strategic View
+          camera.position.x += (0 - camera.position.x) * 0.08;
+          camera.position.y += (26.5 - camera.position.y) * 0.08;
+          camera.position.z += (7.5 - camera.position.z) * 0.08;
+          camera.lookAt(0, 0, 0);
+        } else {
+          // Portal Bridge Action View
+          camera.position.x += (0 - camera.position.x) * 0.08;
+          camera.position.y += (7.5 - camera.position.y) * 0.08;
+          camera.position.z += (13.5 - camera.position.z) * 0.08;
+          camera.lookAt(0, 1.2, 0);
+        }
+
+        // Project 3D Prop Semantic Labels into 2D Screen Coordinates
+        const width = container.clientWidth;
+        const height = container.clientHeight;
+        const tempV = new THREE.Vector3();
+
+        for (let i = 0; i < PROPS.length; i++) {
+          const p = PROPS[i];
+          if (p.destroyed || !GAME_STATE.semanticVision) {
+            p.labelEl.style.display = 'none';
+            continue;
+          }
+          tempV.set(p.x, p.height + 0.55, p.z);
+          tempV.project(camera);
+          if (tempV.z > 1) {
+            p.labelEl.style.display = 'none';
+          } else {
+            p.labelEl.style.display = 'block';
+            const sx = (tempV.x * 0.5 + 0.5) * width;
+            const sy = (-tempV.y * 0.5 + 0.5) * height;
+            p.labelEl.style.left = `${sx}px`;
+            p.labelEl.style.top = `${sy}px`;
+          }
+        }
+      }
+
+      function updateHudOverlay(dt) {
+        const localP = getLocalPlayerObj();
+        const remoteP = getRemotePlayerObj();
+
+        if (GAME_STATE.grenadeCooldown > 0) {
+          GAME_STATE.grenadeCooldown = Math.max(0, GAME_STATE.grenadeCooldown - dt);
+        }
+        const gLabel = document.getElementById('grenade-cd-label');
+        if (gLabel) {
+          gLabel.textContent = GAME_STATE.grenadeCooldown > 0
+            ? `${GAME_STATE.grenadeCooldown.toFixed(1)}s`
+            : 'READY [G]';
+        }
+
+        document.getElementById('p1-hp-text').textContent = `${localP.hp} / 100`;
+        document.getElementById('p1-hp-bar').style.width = `${localP.hp}%`;
+        document.getElementById('p1-energy-text').textContent = `${Math.round(localP.energy)}%`;
+        document.getElementById('p1-energy-bar').style.width = `${localP.energy}%`;
+        document.getElementById('current-zone-pill').textContent = `REALM: ${localP.currentRealm}`;
+        document.getElementById('p1-cover-status').textContent = localP.coverState;
+        document.getElementById('p1-stance-badge').textContent =
+          localP.mode === 'RC_CAR'
+            ? (INPUT.shift ? 'NITRO BOOST' : 'DRIVING')
+            : (localP.crouching ? 'CROUCHING' : 'STANDING');
+
+        document.getElementById('p2-hp-text').textContent = `${remoteP.hp} / 100`;
+        document.getElementById('p2-hp-bar').style.width = `${remoteP.hp}%`;
+
+        const coordsEl = document.getElementById('telemetry-coords');
+        if (coordsEl) {
+          coordsEl.textContent = `(${localP.x.toFixed(1)}, ${localP.z.toFixed(1)})`;
+        }
+      }
+
+      function animate(now) {
+        requestAnimationFrame(animate);
+        const dt = Math.min(0.05, (now - lastFrameTime) / 1000);
+        lastFrameTime = now;
+
+        // Pulse Portal Bridge lights
+        portalLight.intensity = 1.35 + Math.sin(now * 0.005) * 0.45;
+
+        updateLocalPlayerPhysics(dt);
+        updateAiOpponent(dt);
+        updateProjectilesAndParticles(dt);
+
+        syncRigToPlayerState(rigP1, PLAYER_1);
+        syncRigToPlayerState(rigP2, PLAYER_2);
+
+        // Broadcast 25Hz WebRTC State Sync Packet
+        if (now - lastSyncSentTime > 40) {
+          lastSyncSentTime = now;
+          const localP = getLocalPlayerObj();
+          sendRtcMessage({
+            type: 'STATE_SYNC',
+            x: localP.x,
+            z: localP.z,
+            yaw: localP.yaw,
+            mode: localP.mode,
+            crouching: localP.crouching,
+            hp: localP.hp
+          });
+        }
+
+        updateCameraAndLabels();
+        updateHudOverlay(dt);
+        renderer.render(scene, camera);
+      }
+
+      window.addEventListener('resize', () => {
+        const w = Math.max(1, container.clientWidth);
+        const h = Math.max(1, container.clientHeight);
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        renderer.setSize(w, h);
+      });
+
+      window.onload = () => {
+        requestAnimationFrame(animate);
+      };
+    })();
+  </script>
+</body>
+</html>
