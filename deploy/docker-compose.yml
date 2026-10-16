@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  realm-stitchers:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: realm-stitchers-core
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - JAVA_OPTS=-Xms512m -Xmx2g -XX:+UseG1GC
+    networks:
+      - realm-mesh
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/api/v1/argon/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+
+  haproxy:
+    image: haproxy:2.9-alpine
+    container_name: realm-stitchers-gateway
+    restart: unless-stopped
+    ports:
+      - "80:8080"
+      - "8404:8404" # HAProxy Statistics Dashboard
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on:
+      realm-stitchers:
+        condition: service_healthy
+    networks:
+      - realm-mesh
+
+networks:
+  realm-mesh:
+    driver: bridge

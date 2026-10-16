@@ -1,0 +1,63 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: Build & Verify Java Artifact
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21 (Eclipse Temurin)
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Compile, Test, and Verify with Maven
+        run: mvn clean verify -B
+
+      - name: Upload Packaged Application JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: realm-stitchers-package
+          path: target/*.jar
+          retention-days: 7
+
+  docker:
+    name: Build & Tag Container Image
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker Image
+        run: |
+          docker build \
+            --file deploy/Dockerfile \
+            --tag realm-stitchers:${{ github.sha }} \
+            --tag realm-stitchers:latest \
+            .
+
+      - name: Verify Image Inspect
+        run: |
+          docker image inspect realm-stitchers:${{ github.sha }}
